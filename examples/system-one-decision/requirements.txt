@@ -1,0 +1,8 @@
+# Path A (system_one) dependencies. Install into a venv created with --system-site-packages
+# so the board's existing torch and torchvision are reused. See README.md.
+#
+# torch is NOT listed: it must match torchvision and is provided by the system (IQ-9075: torch 2.11.0).
+transformers>=5.14
+torchvision==0.26.0   # matches torch 2.11.0 on the IQ-9075; adjust if your torch differs
+pillow
+packaging

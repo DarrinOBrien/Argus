@@ -1,0 +1,15 @@
+loaded /home/ubuntu/models/d1-3B in 3.0 s, threads=8
+
+== 1. sensor states
+{"t": "2026-10-08T18:10:28.878692+00:00", "obs": {"temp_c": 71.5, "temp_c_1min_ago": 58.0, "motion": "none"}, "p_alert": 0.6983, "alert_fired": true, "category": "thermal", "category_confidence": 0.7522, "severity_expected_level": 1.0, "output_tokens": 0, "input_tokens": 125, "ms": 4555.9}
+{"t": "2026-10-08T18:10:33.147720+00:00", "obs": {"temp_c": 36.8, "temp_c_1min_ago": 36.6, "motion": "none"}, "p_alert": 0.0686, "alert_fired": false, "category": "normal", "category_confidence": 0.7315, "severity_expected_level": 0.264, "output_tokens": 0, "input_tokens": 125, "ms": 4268.9}
+{"t": "2026-10-08T18:10:37.612196+00:00", "obs": {"temp_c": 37.0, "temp_c_1min_ago": 36.9, "motion": "sudden 2.1 g spike"}, "p_alert": 0.5998, "alert_fired": true, "category": "motion", "category_confidence": 0.6362, "severity_expected_level": 1.031, "output_tokens": 0, "input_tokens": 133, "ms": 4464.4}
+
+== 2. image (state=None)
+{"p_red_object": 0.9865, "ms": 7638.5, "input_tokens": 91}
+
+== 3. batch of 3
+{"obs": {"temp_c": 71.5, "temp_c_1min_ago": 58.0, "motion": "none"}, "p_alert": 0.6983}
+{"obs": {"temp_c": 36.8, "temp_c_1min_ago": 36.6, "motion": "none"}, "p_alert": 0.0686}
+{"obs": {"temp_c": 37.0, "temp_c_1min_ago": 36.9, "motion": "sudden 2.1 g spike"}, "p_alert": 0.5998}
+batch of 3 in 13724.1 ms total
