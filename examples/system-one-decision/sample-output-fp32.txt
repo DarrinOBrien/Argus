@@ -1,3 +1,4 @@
+# Historical d1-3B baseline; do not report these values as d1-2B results.
 loaded /home/ubuntu/models/d1-3B in 3.0 s, threads=8
 
 == 1. sensor states

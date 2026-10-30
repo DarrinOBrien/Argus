@@ -3,8 +3,8 @@
 Build environment for the On-Device AI Hackathon: Cleared for Takeoff ✈️.
 
 * Target hardware: **Dragonwing IQ-9075 EVK** only.
-* Generator: LiquidAI Models (LFM2.5-2.6B GGUF suggested, but not required) via GenieX.
-* Decision layer: d1-3B, run natively with transformers on the CPU. See [`decision-models.md`](decision-models.md).
+* Generator and tools: LFM3-1.7B GGUF via GenieX.
+* Decision layer: d1-2B, run natively with transformers on the CPU. See [`decision-models.md`](decision-models.md).
 
 ## Table of contents
 
@@ -28,8 +28,8 @@ Build environment for the On-Device AI Hackathon: Cleared for Takeoff ✈️.
 * GenieX quickstart: <https://geniex.aihub.qualcomm.com/en/get-started/quickstart> 
 * GenieX platforms and runtimes: <https://geniex.aihub.qualcomm.com/en/get-started/platforms> 
 * IQ-9075 EVK setup: <https://dragonwingdocs.qualcomm.com/Ubuntu/devices/iq9075-evk/set-up-the-device> 
-* LFM2.5-2.6B GGUF: <https://huggingface.co/LiquidAI/LFM2.5-2.6B-GGUF> 
-* d1-3B model card: <https://huggingface.co/LiquidAI/d1-3B> 
+* LFM3-1.7B GGUF: <https://huggingface.co/LiquidAI/LFM3-1.7B-GGUF>
+* d1-2B model card: <https://huggingface.co/LiquidAI/d1-2B>
 
 ## 2. Architecture
 
@@ -39,13 +39,13 @@ Build environment for the On-Device AI Hackathon: Cleared for Takeoff ✈️.
 Sensors · camera · logs
    │ observe
    ▼
-d1-3B  — decision gate
-   │     transformers system_one() on the CPU, fp32                                  4.5 s / state
+d1-2B  — decision gate
+   │     transformers system_one() on the CPU, fp32                    measure on board
    │     "alert?"  "category?"  "severity?"    calibrated, zero output tokens
    │
    ├─ below threshold ─→ no_op, log the decision
    │
-   └─ above threshold ─→ LFM2.5-2.6B  (GenieX · llama_cpp · NPU)   explanation
+   └─ above threshold ─→ LFM3-1.7B  (GenieX · llama_cpp · NPU)   explanation or tool call
                               │       one sentence, capped with max_completion_tokens
                               ▼
                        allowlisted action + local decision log   ← the offline proof
@@ -55,8 +55,8 @@ d1-3B  — decision gate
 
 | Model / route    | Runtime                           |
 | ---------------- | --------------------------------- |
-| LFM2.5-2.6B GGUF | GenieX `llama_cpp`, server or CLI |
-| d1-3B Path A     | transformers, `trust_remote_code` |
+| LFM3-1.7B GGUF | GenieX `llama_cpp`, server or CLI |
+| d1-2B Path A    | transformers, `trust_remote_code` |
 
 ### 2.3 Compute units
 
@@ -82,7 +82,7 @@ d1-3B  — decision gate
 uname -m      # aarch64
 df -h /       # plan the models in models.md before pulling
 free -h
-geniex version   # v0.8.0 is the active install; see runtimes.md
+geniex version   # v0.10.0 is the migration target; see runtimes.md
 ```
 
 ### 3.2 Driver packages
@@ -102,12 +102,12 @@ sudo apt-get install -y qcom-adreno1 qcom-fastrpc1 libqnn1
 ### 3.3 GenieX CLI
 
 ```bash
-curl -fsSL https://qaihub-public-assets.s3.us-west-2.amazonaws.com/qai-hub-geniex/install.sh | sh -s -- --version v0.8.0
+curl -fsSL https://qaihub-public-assets.s3.us-west-2.amazonaws.com/qai-hub-geniex/install.sh | sh -s -- --version v0.10.0
 geniex --help
 geniex config get chipset     # Dragonwing IQ-9075 EVK
 ```
 
-Pin `--version` to the version this guide was tested on (v0.8.0). Without it, the installer takes the newest stable release, which may differ. The installer replaces any existing install and moves the old one aside first. Per the installer source, the launcher goes to `~/.local/bin/geniex` even with `--prefix`, so a side install overwrites the active launcher. Back up the launcher first. 
+Pin `--version` to v0.10.0 for this migration. The installer replaces any existing install and moves the old one aside first, so back up the known-good v0.8.0 install before changing the board.
 
 ### 3.4 Python environment for the decision layer
 
@@ -124,14 +124,14 @@ The board already has torch 2.11.0 and torchvision 0.26.0 in the user site, so o
 ## 4. First model in five minutes
 
 ```bash
-geniex pull LiquidAI/LFM2.5-2.6B-GGUF:Q4_0
-geniex infer LiquidAI/LFM2.5-2.6B-GGUF:Q4_0 --compute npu
+geniex pull LiquidAI/LFM3-1.7B-GGUF:Q4_0
+geniex infer LiquidAI/LFM3-1.7B-GGUF:Q4_0 --compute npu
 ```
 
 Confirm the NPU is in use:
 
 ```bash
-GGML_HEX_VERBOSE=1 geniex infer LiquidAI/LFM2.5-2.6B-GGUF:Q4_0 --compute npu
+GGML_HEX_VERBOSE=1 geniex infer LiquidAI/LFM3-1.7B-GGUF:Q4_0 --compute npu
 ```
 
 If there are no Hexagon lines, see §12.
@@ -148,24 +148,24 @@ geniex serve                  # http://127.0.0.1:18181 — does not download mod
 curl http://127.0.0.1:18181/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "LiquidAI/LFM2.5-2.6B-GGUF:Q4_0",
+    "model": "LiquidAI/LFM3-1.7B-GGUF:Q4_0",
     "messages": [{"role": "user", "content": "Say hello in five words."}],
     "max_completion_tokens": 64,
     "stream": false
   }'
 ```
 
-* **Use `max_completion_tokens`.** On v0.8.0 both `max_tokens` and `max_completion_tokens` work. If both are set, `max_completion_tokens` wins (measured). `max_tokens` was ignored on v0.4.0. Use `max_completion_tokens` in all examples. 
-* LFM2.5-2.6B writes its reasoning into the answer. Without a cap, a one-sentence request ran to 200–1,400 tokens.
-* `compute` and `power_mode` can be set per request. `burst` gave 14.4 tok/s against 11.7 at the default on v0.4.0, in one test. 
+* **Use `max_completion_tokens`.** Cap every chat call; use `max_tokens` on raw completions.
+* LFM3-1.7B reasons by default. Inspect the board output and keep the cap.
+* `compute` and `power_mode` can be set per request. On the legacy v0.4.0 stack, `burst` gave 14.4 tok/s against 11.7 at the default in one test.
 * On v0.8.0, after several identical requests the server returns zero tokens. Streamed and non-streamed calls are both affected, so switching to non-streamed does not help. Restart `geniex serve` when you see `completion_tokens: 0`, and vary the prompt (see [`runtimes.md`](runtimes.md#known-gap-zero-token-responses-on-v080)).
-* **Idle unloading.** The model unloads after 300 s with no requests, so the next request takes about 5 s longer. Change it with `--keepalive` or `GENIEX_KEEPALIVE` when you start the server. See [`runtimes.md`](runtimes.md#server-lifecycle-model-loading-and-idle-unloading). 
+* **Idle unloading.** The model unloads after 300 s with no requests. The legacy model's next request took about 5 s longer; measure LFM3. Change the timeout with `--keepalive` or `GENIEX_KEEPALIVE`. See [`runtimes.md`](runtimes.md#server-lifecycle-model-loading-and-idle-unloading).
 * Any OpenAI-compatible client works. Point it at `http://127.0.0.1:18181/v1`.
 * A runnable version that starts the server on the NPU, sends one capped request, and stops it: [`examples/lfm-server-npu`](../examples/lfm-server-npu/README.md).
 
 ## 6. The decision layer
 
-Path A is the decision route on the board. It runs d1-3B natively with transformers on the CPU in fp32: about 4.5 s per state (three questions, one pass, zero output tokens). It does not use GenieX.
+Path A is the decision route on the board. It runs d1-2B natively with transformers on the CPU in fp32 and does not use GenieX. Measure latency and peak RSS on the board.
 
 ```python
 import json, os, sys
@@ -175,7 +175,7 @@ from transformers import AutoModel
 sys.path.insert(0, "examples/system-one-decision")
 from system_one_example import SENSOR_QUESTIONS   # alert, category, severity
 
-model = AutoModel.from_pretrained(os.path.expanduser("~/models/d1-3B"), trust_remote_code=True, dtype=torch.float32)
+model = AutoModel.from_pretrained(os.path.expanduser("~/models/d1-2B"), trust_remote_code=True, dtype=torch.float32)
 model = model.to("cpu").eval()
 
 obs = {"temp_c": 71.5, "temp_c_1min_ago": 58.0, "motion": "none"}
@@ -186,17 +186,17 @@ print(answers["alert"]["noul"], answers["category"]["choice"], answers["severity
 
 Path A details, including the image question: [`examples/system-one-decision`](../examples/system-one-decision/README.md).
 
-The GenieX endpoint `POST /v1/systemone` is absent from v0.4.0 and v0.8.0. Don't build on it. 
+GenieX decision serving is not yet verified with d1-2B on the IQ-9075, so this repo keeps Path A.
 
 ## 7. Choosing a model
 
 | Use case                           | Start with                          |
 | ---------------------------------- | ----------------------------------- |
-| General generator and explanations | `LFM2.5-2.6B-GGUF` Q4_0 (1,594 MB)  |
-| Decision gate                      | `d1-3B`, Path A on the CPU          |
+| General generator and explanations | `LFM3-1.7B-GGUF` Q4_0 (~1.05 GB)    |
+| Decision gate                      | `d1-2B`, Path A on the CPU          |
 | Smallest footprint                 | `LFM2.5-350M-GGUF` Q4_0 (219 MB)    |
 | Camera and image questions         | `LFM2.5-VL-1.6B-GGUF`               |
-| Tool-call experiments              | `LFM2-1.2B-Tool-GGUF` Q4_0 (696 MB) |
+| Tool calls                         | `LFM3-1.7B-GGUF` Q4_0 (shared)      |
 
 Results and sizes: [`models.md`](models.md).
 
@@ -213,41 +213,40 @@ Design rules:
 5. **Cap generation.** Cap every LFM call: `max_tokens` on `/v1/completions` (the explanation path) and `max_completion_tokens` on chat. For one-sentence answers, use a raw completion with the reasoning block closed ([runtimes.md](runtimes.md)).
 6. **Degrade gracefully.** If the generator times out, log the decision and keep the sensor loop running.
 
-The runnable version is [`examples/always-on-agent`](../examples/always-on-agent/README.md). It is the same loop: observe, decide with d1, act through an allowlist, explain only alerts, and log each iteration as JSON. On the IQ-9075 it ran 8 iterations with simulated sensors (3 alerts, all explained) and 14 iterations with a fixed hot state (the zero-token replies were all recovered by the retry). The observation is the board's own thermal telemetry, so no extra hardware is needed. The d1 gate does not track these temperatures (measured; see the always-on example), so its alerts are not usable as-is. The explanation uses a raw completion, not the chat endpoint, because chat replies carry reasoning text ([details](../examples/always-on-agent/README.md#explanations-why-a-raw-completion)).
+The runnable version is [`examples/always-on-agent`](../examples/always-on-agent/README.md). It observes, decides with d1, acts through an allowlist, explains only alerts, and logs each iteration as JSON. The previous LFM2.5/d1-3B measurements in that README are a regression baseline; re-run them for LFM3/d1-2B.
 
 What to check on the board before trusting this loop:
 
-* The decision latency per iteration (about 4.5 s per state on the CPU, measured with fp32) and the explanation latency at your cap: about 2.8 s for 64 tokens and 5.9 s for 128 tokens on a warm v0.8.0 server, streamed or non-streamed. The first call after `geniex serve` starts adds about 5 s for the model load. 
-* That the gate and the generator don't slow each other down when both run. Not free. A decision took **7.7 s** while a generation ran alongside, against **4.1 s** alone. The generator barely changed: 3.2 s against 3.0 s. Lowering torch threads from 8 to 4 did not help (7.5 s), so CPU oversubscription is not the cause. The sequential loop above never runs the two at once. Its iterations take about 4 s with no alert and about 7 s with one. If you move explanations into a separate thread or process, budget about 7.5 s per decision during them.
+* Decision and explanation latency at the configured caps, cold-start cost, and peak memory.
+* Whether the gate and generator slow each other down. Keep the loop sequential until measured.
 
 ## 9. Tool calling
 
-* **GenieX parses tool calls for you.** Send the OpenAI `tools` array to `/v1/chat/completions`, and the reply carries `message.tool_calls` with `finish_reason: "tool_calls"`. Confirmed with `LiquidAI/LFM2-1.2B-Tool-GGUF:Q4_0` on v0.8.0.
-* Measured on the IQ-9075: about 0.9 s per model turn (median, warm server).
+* Send the OpenAI `tools` array to `/v1/chat/completions` and require `message.tool_calls` with `finish_reason: "tool_calls"`. Verify LFM3 parsing on the board.
 * **Don't let the model decide whether to act.** In our tests it chose to alert on 12 of 12 readings, including 39 °C. Without making a tool call, it said it had logged an alert in 4 of 7 runs. Validate every call against its schema, run only allowlisted tools, check write actions against a rule in code, and report what ran from your own record.
 * Keep the tool list to 3–5 functions for small models.
 * Test tool calls with the network off.
 
-Runnable version, with measured behaviour: [`examples/tool-calling`](../examples/tool-calling/README.md).
+Runnable version, with code-side self-tests and the legacy model baseline: [`examples/tool-calling`](../examples/tool-calling/README.md).
 
 ## 10. Measuring performance
 
-`geniex-bench` measures TTFT, prefill, and decode for GGUF models on `llama_cpp`. Match its version to the runtime you are using: v0.8.0 for the active install (22.6 tok/s decode on the NPU bench, 23.4 streamed on the server). The v0.4.0 bench shows 14.3 tok/s.
+`geniex-bench` measures TTFT, prefill, and decode for GGUF models on `llama_cpp`. Match its version to v0.10.0 and report only the new measurements.
 
 ```bash
-D=~/geniex-bench-linux-arm64-v0.8.0          # matches the active install
+D=~/geniex-bench-linux-arm64-v0.10.0
 export LD_LIBRARY_PATH=$D/lib:$D/lib/llama_cpp:$D/lib/qairt
-$D/bin/geniex-bench --plugin llama_cpp --device npu -m LiquidAI/LFM2.5-2.6B-GGUF:Q4_0 -r 5 -p 512 -n 128
+$D/bin/geniex-bench --plugin llama_cpp --device npu -m LiquidAI/LFM3-1.7B-GGUF:Q4_0 -r 5 -p 512 -n 128
 ```
 
 * Defaults: 5 measured runs, 512-token prefill, 128 generated tokens. The summary line is the median.
-* The bench does not measure d1. Measure Path A with `system_one_example.py` (about 4.5 s per state on the CPU).
+* The bench does not measure d1. Measure Path A with `system_one_example.py`.
 * Record the numbers in [`models.md`](models.md).
 
 ## 11. Running offline
 
 1. Pull every model and install every package while the network is up.
-2. Point code at local paths: a `.gguf` in the GenieX cache for LFM, and the local snapshot at `~/models/d1-3B` for Path A.
+2. Point code at local paths: a `.gguf` in the GenieX cache for LFM, and the local snapshot at `~/models/d1-2B` for Path A.
 3. Turn the network off and run the whole loop once.
 
 Full checklist: [`offline-readiness.md`](offline-readiness.md).
@@ -260,10 +259,10 @@ Full checklist: [`offline-readiness.md`](offline-readiness.md).
 | Missing `libCB.so.1`, `libOpenCL_adreno.so.1`, or `libcdsprpc.so.1.0.0`       | Driver packages missing                                                                                     | `sudo apt-get install -y qcom-adreno1 qcom-fastrpc1 libqnn1`                                                                              |
 | Permission denied on `/dev/fastrpc-cdsp`                                      | User not in `fastrpc` group                                                                                 | `sudo usermod -aG fastrpc "$(id -un)"`, then log in again                                                                                 |
 | Works but slow; no Hexagon lines with `GGML_HEX_VERBOSE=1`                    | Silent CPU fallback                                                                                         | Fix the driver packages and recheck                                                                                                       |
-| Output runs to hundreds of tokens                                             | No cap set (LFM2.5-2.6B writes its reasoning into the reply), or `max_tokens` on v0.4.0, which ignored it    | Set `max_completion_tokens` on every call                                                                                                 |
-| `POST /v1/systemone` returns 404                                              | Endpoint not in v0.4.0 or v0.8.0                                                                            | Use Path A                                                                                                                                |
+| Output runs to hundreds of tokens                                             | No cap set, or the reasoning trace is included                                                               | Set `max_completion_tokens` on chat and `max_tokens` on raw completions                                                                  |
+| `POST /v1/systemone` fails                                                    | Decision serving is not configured or verified                                                               | Use Path A                                                                                                                                |
 | Replies with `completion_tokens: 0` after several identical requests (v0.8.0) | Server state after repeated identical prompts. Streamed and non-streamed both affected. Cause not confirmed | Restart `geniex serve`; vary the prompt. See [`runtimes.md`](runtimes.md#known-gap-zero-token-responses-on-v080)                          |
-| First request after a pause or a start takes about 5 s longer                 | Model load, or idle unloading after the keepalive (300 s default)                                           | Expected. Change `--keepalive` or `GENIEX_KEEPALIVE`; see [`runtimes.md`](runtimes.md#server-lifecycle-model-loading-and-idle-unloading)  |
+| First request after a pause or start is slower                                | Model load, or idle unloading after the keepalive (300 s default)                                           | Expected; measure the LFM3 delay. Change `--keepalive` or `GENIEX_KEEPALIVE`; see [`runtimes.md`](runtimes.md#server-lifecycle-model-loading-and-idle-unloading)  |
 | `geniex-bench: libgeniex.so: not found`                                       | Bench libraries not on the path                                                                             | `export LD_LIBRARY_PATH=$D/lib:$D/lib/llama_cpp:$D/lib/qairt`                                                                             |
 | Extra `…-QAD-Q4_0.gguf` in the cache after a re-pull                          | Known v0.4.0 pull behaviour                                                                                 | Remove it as described in [`runtimes.md`](runtimes.md#pitfalls)                                                                           |
 | `No space left on device`                                                     | Staged models exceed free disk                                                                              | Check `geniex list`, then remove unused models                                                                                            |

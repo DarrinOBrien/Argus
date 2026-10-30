@@ -5,7 +5,7 @@ The loop from [`docs/developer-guide.md` §8](../../docs/developer-guide.md#8-bu
 Script: [`always_on_agent.py`](always_on_agent.py). Standard library plus the d1 venv (`transformers`, `torch`, `pillow`).
 
 ```
-observe ─→ decide (d1-3B, CPU) ─→ act (allowlist) ─→ explain (LFM2.5-2.6B, NPU, only on alerts) ─→ log
+observe ─→ decide (d1-2B, CPU) ─→ act (allowlist) ─→ explain (LFM3-1.7B, NPU, only on alerts) ─→ log
    ▲                                                                                              │
    └──────────────────────────────────── wait --interval seconds ─────────────────────────────────┘
 ```
@@ -14,8 +14,8 @@ The steps run in sequence. The gate and the generator never run at the same time
 
 ## Prerequisites
 
-- The d1-3B snapshot at `~/models/d1-3B` and the venv from [`examples/system-one-decision`](../system-one-decision/README.md).
-- A GenieX server on `127.0.0.1:18181` with `LiquidAI/LFM2.5-2.6B-GGUF:Q4_0` in the cache:
+- The d1-2B snapshot at `~/models/d1-2B` and the venv from [`examples/system-one-decision`](../system-one-decision/README.md).
+- A GenieX server on `127.0.0.1:18181` with `LiquidAI/LFM3-1.7B-GGUF:Q4_0` in the cache:
 
   ```bash
   geniex serve --compute npu        # keep this running in another terminal
@@ -38,7 +38,7 @@ cd examples/always-on-agent
 | `--sensor-mode` | `board` | `board` reads the SoC thermal zones (default). `simulated` makes random states and `fixed` repeats one hot state. Both are for tests |
 | `--stable-prompt` | off | leave the timestamp out of explanation prompts (for testing the zero-token retry) |
 | `--log` | `agent_log.jsonl` | JSONL log, appended to |
-| `--model-dir`, `--server`, `--llm` | `~/models/d1-3B`, `http://127.0.0.1:18181`, `LiquidAI/LFM2.5-2.6B-GGUF:Q4_0` | where the models are |
+| `--model-dir`, `--server`, `--llm` | `~/models/d1-2B`, `http://127.0.0.1:18181`, `LiquidAI/LFM3-1.7B-GGUF:Q4_0` | where the models are |
 
 Ctrl-C finishes the current iteration, writes its log line, and prints a summary.
 
@@ -47,7 +47,7 @@ Ctrl-C finishes the current iteration, writes its log line, and prints a summary
 | Step | Function | Notes |
 |---|---|---|
 | Observe | `read_sensors()`, `BoardTelemetry` | Reads the board's thermal zones from `/sys/class/thermal` (about 60 zones). The observation is the hottest zone now, the same value about one minute ago, and the 1-minute CPU load. No extra hardware. |
-| Decide | `decide()` | d1-3B through `system_one()`, the same three questions as the sensor example. Returns `p_alert`, `category`, `severity`, and `gate_ms`. |
+| Decide | `decide()` | d1-2B through `system_one()`, the same three questions as the sensor example. Returns `p_alert`, `category`, `severity`, and `gate_ms`. |
 | Act | `choose_action()`, `run_action()` | Policy picks `log_alert` (when `p_alert >= threshold`) or `no_op`. `run_action()` runs an action only if it is in `ALLOWED_ACTIONS`, otherwise it returns `refused:<name>` and logs it. |
 | Explain | `explain()`, `complete()` | Only for `log_alert`. Retries once on a zero-token reply (see below). Errors are logged, and the loop keeps running. |
 | Log | `main()` | One JSON object per iteration. |
@@ -58,7 +58,7 @@ Ctrl-C finishes the current iteration, writes its log line, and prints a summary
 
 ### Explanations: why a raw completion
 
-LFM2.5-2.6B writes its reasoning into chat replies ("The user wants me to…"), and the cap cuts it off before any sentence appears. Three chat variants (plain, with a system instruction, and with thinking disabled) and a raw completion without the think block all returned reasoning. The agent instead sends a raw completion with the reasoning block already closed:
+LFM3-1.7B reasons by default. The agent sends a raw completion with the reasoning block already closed; verify this shortcut on the board:
 
 ```
 <|im_start|>system ... <|im_end|>
@@ -70,7 +70,7 @@ LFM2.5-2.6B writes its reasoning into chat replies ("The user wants me to…"), 
 
 ```
 
-On the IQ-9075 this returns one sentence of 20–47 tokens in about 1.5–2 s warm. The template is the ChatML tokens the model uses. Check it again if the model changes.
+The template uses LFM3's ChatML tokens. Record its output and latency on the board before the demo.
 
 ### Zero-token replies
 
@@ -90,9 +90,9 @@ On GenieX v0.8.0, repeated identical requests sometimes return HTTP 200 with no 
 
 `explanation` is `null` unless the action was `log_alert`. Each line is written and flushed before the next iteration, so the file is safe to read while the loop runs.
 
-## Measured on the IQ-9075 (v0.8.0)
+## Historical LFM2.5/d1-3B measurements on the IQ-9075
 
-Run with the default settings unless noted. Warm server, except where marked.
+These v0.8.0 results are a regression baseline, not LFM3/d1-2B measurements. Re-run the same cases before the demo.
 
 | Run | What it tested | Result |
 |---|---|---|

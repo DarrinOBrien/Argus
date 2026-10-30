@@ -1,4 +1,4 @@
-"""System One (d1-3B): named decisions over a state, in one forward pass, no output tokens.
+"""System One (d1-2B): named decisions over a state, in one forward pass, no output tokens.
 
 Runs three steps and prints what it gets back:
   1. sensor states, each answered by three questions (noul, choice, score)
@@ -67,12 +67,12 @@ def assert_answer_shape(answers: dict) -> None:
     assert set(answers) == {"alert", "category", "severity"}, answers.keys()
     assert 0.0 <= answers["alert"]["noul"] <= 1.0
     assert answers["category"]["choice"] in SENSOR_QUESTIONS["category"]["criteria"]
-    assert 0.0 <= answers["severity"]["score"] <= 2.0  # expected level index on 3 levels
+    assert 0.0 <= answers["severity"]["score"] <= 2.0  # median level index on 3 levels
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--model-dir", default="~/models/d1-3B")
+    ap.add_argument("--model-dir", default="~/models/d1-2B")
     ap.add_argument("--log", default="decisions.jsonl")
     ap.add_argument("--dtype", default="float32", choices=["float32", "bfloat16"],
                     help="weight dtype on CPU. float32 matches the model card's CPU path.")
@@ -103,7 +103,7 @@ def main() -> None:
                 "alert_fired": p_alert >= ALERT_THRESHOLD,
                 "category": answers["category"]["choice"],
                 "category_confidence": round(answers["category"]["confidence"], 4),
-                "severity_expected_level": round(answers["severity"]["score"], 3),
+                "severity_level": round(answers["severity"]["score"], 3),
                 "output_tokens": res["usage"]["output_tokens"],
                 "input_tokens": res["usage"]["input_tokens"],
                 "ms": round(ms, 1),
@@ -118,7 +118,7 @@ def main() -> None:
             model.system_one,
             None,
             {"red": {"type": "noul", "instructions": "Is there a red object in this picture?"}},
-            images=[red_square_image()],
+            media=[red_square_image()],
         )
     print(json.dumps({"p_red_object": round(res["answers"]["red"]["noul"], 4), "ms": round(ms, 1),
                       "input_tokens": res["usage"]["input_tokens"]}))

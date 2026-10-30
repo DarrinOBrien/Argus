@@ -3,16 +3,15 @@
 
 Copy this file into your app. It handles the board-specific traps:
   - every request is capped (max_completion_tokens on chat, max_tokens on completions)
-  - zero-token replies (GenieX v0.8.0 after repeated identical prompts) are retried once with a unique tag
-  - sentence() uses a raw completion with the reasoning block already closed, because LFM2.5-2.6B
-    writes its reasoning into chat replies
+  - zero-token replies are retried once with a unique tag
+  - sentence() uses a raw completion with LFM3's default reasoning block already closed
   - errors come back as data (ok=False, error=...), so a loop can log them and keep running
 
     from lfm_client import LFM
-    lfm = LFM()                                    # http://127.0.0.1:18181, LFM2.5-2.6B Q4_0
+    lfm = LFM()                                    # http://127.0.0.1:18181, LFM3-1.7B Q4_0
     r = lfm.sentence("Explain this alert in one sentence: SoC 74 C, up 13 C in a minute.")
     r = lfm.chat([{"role": "user", "content": "Say hi."}], max_tokens=32)
-    r = lfm.chat(messages, tools=[...], model="LiquidAI/LFM2-1.2B-Tool-GGUF:Q4_0")
+    r = lfm.chat(messages, tools=[...])
 
 CLI:
     python3 lfm_client.py --check                  # server up? which models?
@@ -29,11 +28,11 @@ import urllib.request
 import uuid
 
 DEFAULT_SERVER = "http://127.0.0.1:18181"
-DEFAULT_MODEL = "LiquidAI/LFM2.5-2.6B-GGUF:Q4_0"
+DEFAULT_MODEL = "LiquidAI/LFM3-1.7B-GGUF:Q4_0"
 
-# ChatML, as used by LFM2/LFM2.5. The empty <think></think> block makes LFM2.5-2.6B answer directly
-# (measured: one sentence in 20-47 tokens, about 1.5-2 s warm). Re-check if you change models.
-_TEMPLATE = ("<|im_start|>system\n{SYSTEM}<|im_end|>\n"
+# ChatML, as used by LFM3. The empty <think></think> block asks it to answer directly.
+# Verify output and timing on the board before relying on this shortcut.
+_TEMPLATE = ("<|startoftext|><|im_start|>system\n{SYSTEM}<|im_end|>\n"
              "<|im_start|>user\n{USER}<|im_end|>\n"
              "<|im_start|>assistant\n")
 _CLOSED_THINK = "<think>\n\n</think>\n\n"
@@ -73,7 +72,7 @@ class LFM:
     def chat(self, messages, max_tokens=128, tools=None, model=None, retry_zero=True, **extra):
         """POST /v1/chat/completions. Returns a dict: ok, text, tool_calls, tokens, finish, ms, retried, error.
 
-        LFM2.5-2.6B puts its reasoning in `text`. For a direct one-sentence answer use sentence().
+        LFM3-1.7B may put reasoning in `text`. For a direct one-sentence answer use sentence().
         """
         body = {"model": model or self.model, "messages": messages, "max_completion_tokens": max_tokens,
                 "compute": self.compute, "stream": False, **extra}
@@ -108,8 +107,8 @@ class LFM:
         return self._with_retry(lambda: parse(*self._post("/v1/completions", body)), tag, retry_zero)
 
     def sentence(self, user, system=DEFAULT_SYSTEM, max_tokens=80, close_think=True, model=None):
-        """One direct sentence from a raw ChatML completion. close_think=True is needed for LFM2.5-2.6B;
-        it is harmless to drop for non-thinking models such as LFM2-1.2B-Tool."""
+        """One direct sentence from a raw ChatML completion. close_think=True closes LFM3's
+        default reasoning block."""
         prompt = _TEMPLATE.replace("{SYSTEM}", system).replace("{USER}", user)
         if close_think:
             prompt += _CLOSED_THINK
@@ -155,7 +154,7 @@ def main():
     g = ap.add_mutually_exclusive_group(required=True)
     g.add_argument("--check", action="store_true", help="is the server up, and which models does it list")
     g.add_argument("--sentence", metavar="TEXT", help="one direct sentence (raw completion, closed think block)")
-    g.add_argument("--chat", metavar="TEXT", help="one chat request (LFM2.5-2.6B replies include reasoning)")
+    g.add_argument("--chat", metavar="TEXT", help="one chat request (LFM3 replies may include reasoning)")
     args = ap.parse_args()
 
     lfm = LFM(args.server, args.model)

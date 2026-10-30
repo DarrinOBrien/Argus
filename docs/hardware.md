@@ -26,7 +26,7 @@ The event uses the **IQ-9075 EVK only**. Markers: ✅ confirmed in Qualcomm docs
 
 | Component | Version | Set up in |
 |---|---|---|
-| GenieX CLI | v0.8.0 | [developer guide §3.3](developer-guide.md#33-geniex-cli) |
+| GenieX CLI | v0.10.0 migration target | [developer guide §3.3](developer-guide.md#33-geniex-cli) |
 | NPU driver packages | `qcom-adreno1`, `qcom-fastrpc1`, `libqnn1`, plus base APT packages | [§3.2](developer-guide.md#32-driver-packages) |
 | Python 3.12 venv with transformers | transformers 5.19.0 observed | [§3.4](developer-guide.md#34-python-environment-for-the-decision-layer) |
 | torch, torchvision | CPU builds (2.11.0, 0.26.0 observed). No CUDA device, so Path A runs on the CPU. | §3.4 |
@@ -44,7 +44,7 @@ uname -m                    # aarch64
 df -h /                     # disk: plan before pulling
 free -h                     # RAM
 ls /dev/fastrpc-cdsp*       # two CDSP nodes on IQ-9075 ✅
-geniex version              # v0.8.0 is what this guide was tested on
+geniex version              # expect v0.10.0 for the LFM3 migration
 geniex list                 # what is already in the GenieX cache
 ```
 

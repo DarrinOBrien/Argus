@@ -3,17 +3,17 @@
 
 Each iteration:
   1. observe   read the board's own telemetry (SoC thermal zones, CPU load) by default
-  2. decide    d1-3B gate (Path A: transformers, CPU, fp32) returns p_alert, category, severity
+  2. decide    d1-2B gate (Path A: transformers, CPU, fp32) returns p_alert, category, severity
   3. act       choose an action; only allowlisted actions run, anything else is refused
-  4. explain   only when the action is log_alert: LFM2.5-2.6B (GenieX, NPU) writes one sentence.
+  4. explain   only when the action is log_alert: LFM3-1.7B (GenieX, NPU) writes one sentence.
                Uses a raw completion with the reasoning block closed, because the chat path
                returns reasoning text (see README).
   5. log       one JSON line per iteration
 
-The loop is sequential, so the gate and the generator never run at the same time.
-Running them together slows the gate about 1.9x (measured on the IQ-9075).
+The loop is sequential, so the gate and the generator never run at the same time. The previous
+stack slowed the gate about 1.9x under concurrency; re-measure this stack before changing the design.
 
-Requires: a GenieX server on --server with the --llm model cached, and the d1-3B snapshot
+Requires: a GenieX server on --server with the --llm model cached, and the d1-2B snapshot
 at --model-dir (see examples/system-one-decision/README.md).
 """
 
@@ -148,12 +148,11 @@ def run_action(name, decision):
     return name
 
 
-# LFM2.5-2.6B writes its reasoning into chat replies ("The user wants me to...") and the cap cuts
-# them off. A raw completion with an empty <think></think> block already closed returns the sentence
-# (measured: about 30 tokens, about 1.5 s). The system line and template are the ChatML tokens the
-# model uses. Re-check them if the model changes.
+# LFM3-1.7B enables reasoning by default, and a cap can cut the chat reply before the answer. A raw
+# completion with an empty <think></think> block already closed asks for the sentence directly. The
+# system line and template are the model's ChatML tokens.
 SYSTEM_LINE = "You write one-sentence alerts for operators. Reply with the sentence only."
-TEMPLATE = ("<|im_start|>system\n" + SYSTEM_LINE + "<|im_end|>\n"
+TEMPLATE = ("<|startoftext|><|im_start|>system\n" + SYSTEM_LINE + "<|im_end|>\n"
             "<|im_start|>user\n{USER}<|im_end|>\n"
             "<|im_start|>assistant\n<think>\n\n</think>\n\n")
 
@@ -174,7 +173,7 @@ def complete(server, model_name, user_text, max_tokens):
     body = json.dumps({
         "model": model_name,
         "prompt": TEMPLATE.replace("{USER}", user_text),
-        "max_tokens": max_tokens,  # honored by /v1/completions on v0.8.0 (measured)
+        "max_tokens": max_tokens,
         "compute": "npu",
         "stream": False,  # one JSON reply per call
     }).encode()
@@ -193,7 +192,7 @@ def complete(server, model_name, user_text, max_tokens):
 
 
 def explain(server, model_name, obs, decision, max_tokens, stable_prompt):
-    """One explanation. A zero-token reply (seen on GenieX v0.8.0 after repeated identical prompts)
+    """One explanation. A zero-token reply
     is retried once with a unique tag. Failures are logged and the loop keeps running."""
     out = {"ok": False, "retried": False, "zero_token_first_try": False,
            "text": None, "tokens": 0, "finish": None, "ms": None, "error": None}
@@ -221,9 +220,9 @@ def server_ready(server):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--model-dir", default="~/models/d1-3B")
+    ap.add_argument("--model-dir", default="~/models/d1-2B")
     ap.add_argument("--server", default="http://127.0.0.1:18181")
-    ap.add_argument("--llm", default="LiquidAI/LFM2.5-2.6B-GGUF:Q4_0")
+    ap.add_argument("--llm", default="LiquidAI/LFM3-1.7B-GGUF:Q4_0")
     ap.add_argument("--iterations", type=int, default=0, help="0 = run until Ctrl-C")
     ap.add_argument("--interval", type=float, default=5.0, help="seconds to wait between iterations")
     ap.add_argument("--threshold", type=float, default=0.5,
@@ -253,7 +252,7 @@ def main():
 
     model = AutoModel.from_pretrained(model_dir, trust_remote_code=True, dtype=torch.float32)
     model = model.to("cpu").eval()
-    print(f"gate loaded: d1-3B fp32 on CPU, threads={torch.get_num_threads()}", flush=True)
+    print(f"gate loaded: d1-2B fp32 on CPU, threads={torch.get_num_threads()}", flush=True)
     print(f"generator:   {args.llm} via {args.server}", flush=True)
     print(f"sensors:     {args.sensor_mode}" + (f" ({len(telemetry.zones)} thermal zones)" if telemetry else ""),
           flush=True)

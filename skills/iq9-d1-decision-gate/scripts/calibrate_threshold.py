@@ -8,13 +8,13 @@ Input: JSONL. Each line has a label and either a stored probability or a state t
 "label" to each line (their probability is at decision.p_alert).
 
     python calibrate_threshold.py labeled.jsonl                      # stored probabilities only, no torch
-    ~/.venvs/d1/bin/python calibrate_threshold.py labeled.jsonl --score --model-dir ~/models/d1-3B
+    ~/.venvs/d1/bin/python calibrate_threshold.py labeled.jsonl --score --model-dir ~/models/d1-2B
     python calibrate_threshold.py labeled.jsonl --objective recall --min-precision 0.8
     python calibrate_threshold.py --self-test
 
 Output: a threshold sweep, the chosen threshold, and its confusion matrix. Also warns when d1 does not separate
-the classes (AUC near 0.5). On the board's own thermal readings it did not (r = -0.08 against temperature,
-measured); then use a rule instead, or rewrite the state and questions.
+the classes (AUC near 0.5). The previous d1-3B gate did not track the board's thermal readings; calibrate
+d1-2B afresh, then use a rule instead or rewrite the state and questions if it still does not separate them.
 """
 
 import argparse
@@ -124,7 +124,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("labeled", nargs="?", help="JSONL with label plus p_alert (or obs, with --score)")
     ap.add_argument("--score", action="store_true", help="score rows without p_alert using d1 (needs the d1 venv)")
-    ap.add_argument("--model-dir", default="~/models/d1-3B")
+    ap.add_argument("--model-dir", default="~/models/d1-2B")
     ap.add_argument("--questions-from", default=os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                                              "..", "..", "..", "examples", "system-one-decision"),
                     help="directory with system_one_example.py (SENSOR_QUESTIONS)")

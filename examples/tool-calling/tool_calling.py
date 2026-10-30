@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tool calling with LFM2-1.2B-Tool on GenieX (OpenAI `tools` schema).
+"""Tool calling with LFM3-1.7B on GenieX (OpenAI `tools` schema).
 
 The model picks a tool and fills its arguments. Code does everything else:
   1. validate   the call against the tool's JSON schema
@@ -9,7 +9,7 @@ The model picks a tool and fills its arguments. Code does everything else:
   5. log        every step is one JSON line; the summary lists only actions that actually ran
 
 Standard library only. Needs `geniex serve` on --server with the model cached:
-    geniex pull LiquidAI/LFM2-1.2B-Tool-GGUF:Q4_0
+    geniex pull LiquidAI/LFM3-1.7B-GGUF:Q4_0
     geniex serve --compute npu
 
     python3 tool_calling.py
@@ -297,7 +297,7 @@ def self_test():
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--prompt", default="How hot is the board right now, and how busy is the CPU?")
-    ap.add_argument("--model", default="LiquidAI/LFM2-1.2B-Tool-GGUF:Q4_0")
+    ap.add_argument("--model", default="LiquidAI/LFM3-1.7B-GGUF:Q4_0")
     ap.add_argument("--server", default="http://127.0.0.1:18181")
     ap.add_argument("--max-steps", type=int, default=4, help="model turns before giving up")
     ap.add_argument("--max-tokens", type=int, default=128, help="cap per model turn (max_completion_tokens)")

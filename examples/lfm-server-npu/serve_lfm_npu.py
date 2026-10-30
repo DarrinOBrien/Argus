@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Start GenieX on the NPU for LFM2.5-2.6B and send one capped chat request.
+"""Start GenieX on the NPU for LFM3-1.7B and send one capped chat request.
 
 Standard library only. The model must already be in the GenieX cache:
-    geniex pull LiquidAI/LFM2.5-2.6B-GGUF:Q4_0
+    geniex pull LiquidAI/LFM3-1.7B-GGUF:Q4_0
 This script downloads nothing.
 
     python serve_lfm_npu.py
@@ -18,7 +18,7 @@ import time
 import urllib.error
 import urllib.request
 
-MODEL = "LiquidAI/LFM2.5-2.6B-GGUF:Q4_0"
+MODEL = "LiquidAI/LFM3-1.7B-GGUF:Q4_0"
 HOST = "127.0.0.1"
 PORT = 18181
 BASE = f"http://{HOST}:{PORT}"
@@ -61,7 +61,7 @@ def chat(prompt: str, max_tokens: int, timeout: float) -> tuple[dict, float]:
     body = json.dumps({
         "model": MODEL,
         "messages": [{"role": "user", "content": prompt}],
-        "max_completion_tokens": max_tokens,  # max_tokens was ignored on v0.4.0; this field works on both
+        "max_completion_tokens": max_tokens,  # retained for compatibility with the measured legacy runtimes
         "compute": "npu",
         "stream": False,  # one JSON reply per call; streaming is not the cause of zero-token replies (see README)
     }).encode()
@@ -108,11 +108,11 @@ def main() -> None:
           f"completion_tokens={n}")
     print(f"end-to-end {wall:.2f} s ({n / wall:.1f} tok/s, includes prefill)")
     if n == 0:
-        print("Zero-token reply: GenieX v0.8.0 can return these after repeated identical requests. "
+        print("Zero-token reply. "
               "Restart geniex serve and vary the prompt (docs/runtimes.md).")
         sys.exit(2)
     if choice["finish_reason"] == "length":
-        print("Hit the cap. LFM2.5-2.6B writes its reasoning into the answer; "
+        print("Hit the cap. LFM3-1.7B may include reasoning in the answer; "
               "raise --max-tokens or make the prompt narrower.")
 
 

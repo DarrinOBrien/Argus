@@ -36,13 +36,13 @@ skills/iq9-geniex-lfm/scripts/serve.sh start
 skills/iq9-demo-prep/scripts/collect_metrics.sh --log apps/<name>/agent_log.jsonl --out apps/<name>/metrics.json
 ```
 
-It records the LFM TTFT, decode tok/s, and end-to-end time (median of 5 streamed runs after one warm-up), plus server RSS, memory, disk, and the hottest thermal zone. With `--log`, it also adds the app's gate and loop medians, the alert count, and the time span. For reference, a warm LFM2.5-2.6B Q4_0 on the NPU gave about 0.1–0.2 s TTFT and about 23 tok/s.
+It records the LFM TTFT, decode tok/s, and end-to-end time (median of 5 streamed runs after one warm-up), plus server RSS, memory, disk, and the hottest thermal zone. With `--log`, it also adds the app's gate and loop medians, the alert count, and the time span. Do not reuse the previous LFM2.5 numbers for LFM3.
 
 For the Fastest Agent or Best Tiny Agent awards, add:
 - **End-to-end loop time** from the app log: `loop_ms` median and p95, not just model speed.
 - **Footprint:** model size on disk (`geniex list`), server RSS, and peak RSS of the app (`/usr/bin/time -v`, "Maximum resident set size"). Note that d1 fp32 alone peaks at about 19.4 GB, so tiny-agent entries usually drop d1 or use a smaller model.
 - **Endurance:** run for 30 minutes or more, and report the iteration count, errors, and the temperature trend.
-- **Bench, optional:** `geniex-bench` (see `docs/developer-guide.md` §10). Use the v0.8.0 bench to match the runtime, and set `LD_LIBRARY_PATH` as shown there.
+- **Bench, optional:** `geniex-bench` (see `docs/developer-guide.md` §10). Use the v0.10.0 bench to match the runtime, and set `LD_LIBRARY_PATH` as shown there.
 
 Write the numbers into the app's README with the GenieX version, the model and precision, and n. Mark anything not measured as ⚠️.
 
@@ -64,4 +64,4 @@ Keep a visible timer, a recorded backup video, and a recorded log ready.
 - [ ] The `iq9-offline-rehearsal` network-off run is done, and its evidence is saved.
 - [ ] Start the server with a long keepalive (`serve.sh start` uses 1800 s), and send one warm-up request just before going on.
 - [ ] Use fresh, varied prompts (zero-token risk), and have `serve.sh restart` ready.
-- [ ] Read the licence for every model shown. LiquidAI GGUF repos are tagged `other`; d1-3B uses the LFM Open License v1.0.
+- [ ] Read the licence for every model shown. LFM3-1.7B and d1-2B use the LFM Open License v1.0.

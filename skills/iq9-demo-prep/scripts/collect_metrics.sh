@@ -7,11 +7,11 @@
 #   TTFT (time to first content chunk), decode tok/s (tokens after the first / time after the first), end-to-end.
 # Also records: geniex version, device in use, server RSS, system memory, disk, hottest thermal zone,
 # and, if --log points at an always-on-agent style JSONL, gate/loop latency medians and alert counts.
-# Prompts are varied per run to avoid the v0.8.0 zero-token state. Read-only apart from --out.
+# Prompts are varied per run to avoid server state carrying across identical requests. Read-only apart from --out.
 
 set -euo pipefail
 
-MODEL="LiquidAI/LFM2.5-2.6B-GGUF:Q4_0"; RUNS=5; APPLOG=""; OUT=""
+MODEL="LiquidAI/LFM3-1.7B-GGUF:Q4_0"; RUNS=5; APPLOG=""; OUT=""
 PORT="${GENIEX_PORT:-18181}"
 while [ $# -gt 0 ]; do
   case "$1" in

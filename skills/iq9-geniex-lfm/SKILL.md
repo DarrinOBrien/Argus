@@ -1,7 +1,7 @@
 ---
 name: iq9-geniex-lfm
-description: Call LiquidAI LFM models through GenieX on the Dragonwing IQ-9075. Covers starting and stopping geniex serve, capped chat and raw-completion requests, one-sentence answers from LFM2.5-2.6B, zero-token replies, cold starts, idle unloading, NPU checks, and model choice. Use whenever app code talks to an LFM, to geniex serve, or to http://127.0.0.1:18181.
-compatibility: Runs on the IQ-9075 (aarch64, Ubuntu 24.04) with GenieX CLI v0.8.0. The client works from any Python 3.10+ that can reach the server.
+description: Call LiquidAI LFM models through GenieX on the Dragonwing IQ-9075. Covers starting and stopping geniex serve, capped requests, one-sentence answers from LFM3-1.7B, empty replies, cold starts, idle unloading, NPU checks, and model choice. Use whenever app code talks to an LFM, to geniex serve, or to http://127.0.0.1:18181.
+compatibility: Targets the IQ-9075 (aarch64, Ubuntu 24.04) with GenieX CLI v0.10.0. The client works from any Python 3.10+ that can reach the server. LFM3 performance is not yet measured on the board.
 metadata:
   version: "0.1"
 ---
@@ -33,37 +33,29 @@ Copy `scripts/lfm_client.py` into the app, or import it. It uses only the standa
 
 ```python
 from lfm_client import LFM
-lfm = LFM()                                                        # LFM2.5-2.6B Q4_0 on the NPU
+lfm = LFM()                                                        # LFM3-1.7B Q4_0 on the NPU
 r = lfm.sentence("Explain to an operator: SoC 74 C, up 13 C in one minute (rising).")
-if r["ok"]: print(r["text"])                                       # ~20-47 tokens, ~1.5-2 s warm
+if r["ok"]: print(r["text"])
 else: log(r["error"])                                              # never raises on HTTP/timeouts
 ```
 
 Rules the client follows. Keep them if you write your own client:
 
-| Rule | Why (measured on the board, v0.8.0) |
+| Rule | Why |
 |---|---|
-| Cap every call: `max_completion_tokens` on chat, `max_tokens` on `/v1/completions` | LFM2.5-2.6B ran 200–1,400 tokens for a "one sentence" request |
-| For a direct answer from LFM2.5-2.6B, use a raw `/v1/completions` call with `<think>\n\n</think>\n\n` after the assistant tag (`lfm.sentence`) | Chat replies start with reasoning ("The user wants…"). `enable_think`, `chat_template_kwargs`, `reasoning_format`, and `stop` did not change that |
-| Treat `completion_tokens == 0` as a failure. Retry once with a unique tag, then restart the server | v0.8.0 returns HTTP 200 with zero tokens after 5–7 identical prompts. Restarting clears it |
+| Cap every call: `max_completion_tokens` on chat, `max_tokens` on `/v1/completions` | Bounds latency and output on the edge |
+| For a direct answer from LFM3-1.7B, use a raw `/v1/completions` call with `<think>\n\n</think>\n\n` after the assistant tag (`lfm.sentence`) | LFM3 reasoning is enabled by default; verify this shortcut on the board |
+| Treat `completion_tokens == 0` as a failure. Retry once with a unique tag, then restart the server | Defensive handling retained from the v0.8.0 stack |
 | Vary prompts: include a timestamp or a short tag | The same trigger |
-| Send `"stream": false` unless you need streaming | Easier token accounting. Streaming doesn't avoid the zero-token bug |
-| Set `compute` on each request (`npu`) | Server CPU decode is about 2.8 tok/s, against about 23 tok/s on the NPU |
+| Send `"stream": false` unless you need streaming | Easier token accounting |
+| Set `compute` on each request (`npu`) | Keeps the generator on the Hexagon NPU; confirm `HTP0` in the log |
 | Give the model numbers *and* direction ("rising 13 C/min") | It described a falling temperature as rising when it only had the two values |
 
 `python3 scripts/lfm_client.py --check` checks the server and lists its models. `--sentence "..."` and `--chat "..."` are quick tests. Exit code 2 means the reply was empty or failed.
 
-## 3. Timing to plan around (IQ-9075, warm server, NPU)
+## 3. Timing to plan around
 
-| | |
-|---|---|
-| Decode | about 23 tok/s |
-| 64 / 128 tokens | about 2.8 s / about 5.6–5.9 s |
-| `lfm.sentence()` | about 1.5–2 s |
-| First token (streamed) | 0.13–0.16 s |
-| First request after a start or an idle unload | add about 5 s |
-
-LFM calls slow the d1 gate from about 4 s to about 7.7 s if both run at once. Keep them sequential (see `iq9-d1-decision-gate`).
+LFM3-1.7B has not been measured on the reference IQ-9075. Run `collect_metrics.sh` before quoting latency, decode, memory, or cold-start numbers. Keep LFM and d1 sequential until concurrency is measured.
 
 ## 4. Picking a model
 
@@ -71,8 +63,7 @@ Run `geniex list` before you pull anything. Pull only what is missing, and check
 
 | Job | Model | Notes |
 |---|---|---|
-| Explanations, general text | `LiquidAI/LFM2.5-2.6B-GGUF:Q4_0` | Measured. Use `sentence()` for direct answers |
-| Tool calls | `LiquidAI/LFM2-1.2B-Tool-GGUF:Q4_0` | Measured. See the `iq9-lfm-tool-calling` skill. No reasoning preamble, so `close_think=False` is fine |
+| Explanations, general text, tool calls | `LiquidAI/LFM3-1.7B-GGUF:Q4_0` | Shared checkpoint; use `sentence()` for direct answers. ⚠️ unverified on the board |
 | Smallest footprint | `LiquidAI/LFM2.5-350M-GGUF:Q4_0` (219 MB) | Not measured on the board. Measure it before you claim anything |
 | Images | `LiquidAI/LFM2.5-VL-1.6B-GGUF` or `-VL-450M-GGUF` | Run `geniex model set-type <model> vlm`. Not measured |
 | Audio | `LiquidAI/LFM2.5-Audio-1.5B-GGUF` | Four files. Audio input is llama.cpp-only. Not measured |
@@ -81,7 +72,7 @@ Put any new number in the app's README with its marker (🧪 measured, ⚠️ un
 
 ## 5. Don'ts
 
-- Don't use `POST /v1/systemone`. It returns 404 on v0.4.0 and v0.8.0. d1 runs through transformers (`iq9-d1-decision-gate`).
+- Keep d1 on the repo's tested Path A structure through transformers until GenieX decision serving is verified (`iq9-d1-decision-gate`).
 - Don't load models by Hugging Face repo ID from app code. It fails offline.
 - Don't bind the server to `0.0.0.0` unless the user asks for it.
-- Don't upgrade or reinstall GenieX during the event. The numbers above are for v0.8.0.
+- Don't change GenieX versions between rehearsal and the event. The active target is v0.10.0.

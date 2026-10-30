@@ -10,8 +10,8 @@ from packaging.version import Version
 
 from fetch_d1 import REVISION
 
-MODEL_DIR = pathlib.Path("~/models/d1-3B").expanduser()
-MIN_TRANSFORMERS = Version("5.14")
+MODEL_DIR = pathlib.Path("~/models/d1-2B").expanduser()
+MIN_TRANSFORMERS = Version("5.19")
 
 failures: list[str] = []
 

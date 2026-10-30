@@ -54,7 +54,7 @@ Always-on local agent on the Dragonwing IQ-9075, started from \`examples/always-
 
 ## Loop
 
-observe → decide (d1-3B, CPU) → act (allowlist) → explain (LFM, NPU, only on alerts) → log (JSONL)
+observe → decide (d1-2B, CPU) → act (allowlist) → explain (LFM, NPU, only on alerts) → log (JSONL)
 
 ## What to change
 

@@ -6,18 +6,18 @@
 #   preflight.sh --json     one JSON object (for agents)
 #
 # Exit 0: no FAIL. Exit 1: at least one FAIL. WARN never fails the run.
-# Env: D1_PYTHON (default ~/.venvs/d1/bin/python), D1_MODEL_DIR (default ~/models/d1-3B),
-#      EXPECT_GENIEX (default v0.8.0), MIN_FREE_GB (default 10), GENIEX_PORT (default 18181)
+# Env: D1_PYTHON (default ~/.venvs/d1/bin/python), D1_MODEL_DIR (default ~/models/d1-2B),
+#      EXPECT_GENIEX (default v0.10.0), MIN_FREE_GB (default 10), GENIEX_PORT (default 18181)
 
 set -uo pipefail
 
 JSON=0; [ "${1:-}" = "--json" ] && JSON=1
 D1_PYTHON="${D1_PYTHON:-$HOME/.venvs/d1/bin/python}"
-D1_MODEL_DIR="${D1_MODEL_DIR:-$HOME/models/d1-3B}"
-EXPECT_GENIEX="${EXPECT_GENIEX:-v0.8.0}"
+D1_MODEL_DIR="${D1_MODEL_DIR:-$HOME/models/d1-2B}"
+EXPECT_GENIEX="${EXPECT_GENIEX:-v0.10.0}"
 MIN_FREE_GB="${MIN_FREE_GB:-10}"
 PORT="${GENIEX_PORT:-18181}"
-D1_REVISION="051bcc464b01b9f92942b364d9586b0ef5912432"
+D1_REVISION="10e7671d44e4b37700020b1eed3f594c5f2af0b4"
 
 RESULTS=()
 FAILS=0
@@ -50,17 +50,17 @@ fi
 
 mem_gb="$(awk '/MemAvailable/ {printf "%d", $2/1024/1024}' /proc/meminfo 2>/dev/null)"
 [ -n "$mem_gb" ] && { [ "$mem_gb" -ge 20 ] && add ok memory "${mem_gb}G available" \
-  || add WARN memory "${mem_gb}G available (d1 fp32 peaks at ~19.4 GB)" "stop other large processes"; }
+  || add WARN memory "${mem_gb}G available (d1-2B fp32 peak is not measured here)" "stop other large processes"; }
 
 # ---- geniex -----------------------------------------------------------------------------------------
 if command -v geniex >/dev/null; then
   ver="$(geniex version 2>/dev/null | awk -F': *' '/CLI Version/ {print $2}' | tr -d ' ')"
   [ "$ver" = "$EXPECT_GENIEX" ] && add ok geniex "$ver" \
-    || add WARN geniex "${ver:-unknown} (docs were measured on $EXPECT_GENIEX)" "numbers in docs/ may not apply; do not reinstall without asking"
+    || add WARN geniex "${ver:-unknown} (migration targets $EXPECT_GENIEX)" "the active stack may not apply; do not reinstall without asking"
   chip="$(geniex config get chipset 2>/dev/null | tail -1)"
   case "$chip" in *IQ-9075*) add ok chipset "$chip" ;; *) add WARN chipset "${chip:-unknown}" "" ;; esac
   list="$(geniex list 2>/dev/null)"
-  for m in "LiquidAI/LFM2.5-2.6B-GGUF Q4_0 FAIL" "LiquidAI/LFM2-1.2B-Tool-GGUF Q4_0 WARN"; do
+  for m in "LiquidAI/LFM3-1.7B-GGUF Q4_0 FAIL"; do
     # shellcheck disable=SC2086  # split "repo precision level" on purpose
     set -- $m
     if echo "$list" | awk -F'│' -v r="$1" -v p="$2" '{gsub(/ /,"",$2); gsub(/ /,"",$4)} $2==r && $4 ~ p {f=1} END {exit !f}'; then
@@ -93,7 +93,7 @@ if [ -f "$D1_MODEL_DIR/model.safetensors" ]; then
   [ "$rev" = "$D1_REVISION" ] && add ok d1-snapshot "$D1_MODEL_DIR @ ${rev:0:12}" \
     || add FAIL d1-snapshot "REVISION ${rev:-missing} (expected ${D1_REVISION:0:12})" "run examples/system-one-decision/fetch_d1.py; review remote code before moving the pin"
 else
-  add FAIL d1-snapshot "no model.safetensors in $D1_MODEL_DIR" "$D1_PYTHON examples/system-one-decision/fetch_d1.py --dest $D1_MODEL_DIR (needs network, ~6.2 GB)"
+  add FAIL d1-snapshot "no model.safetensors in $D1_MODEL_DIR" "$D1_PYTHON examples/system-one-decision/fetch_d1.py --dest $D1_MODEL_DIR (needs network, ~3.8 GB)"
 fi
 
 # ---- thermal (the default sensor) -------------------------------------------------------------------

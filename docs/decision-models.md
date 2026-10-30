@@ -1,6 +1,6 @@
-# Decision Layer — LiquidAI d1-3B
+# Decision Layer — LiquidAI d1-2B
 
-`LiquidAI/d1-3B` is a 3.12B-parameter **decision model**. You give it a state (text, JSON, images, or a mix) and named questions. It returns calibrated, typed answers in **one forward pass with zero output tokens**. It is not a chat model and does not write text. ✅ (model card)
+`LiquidAI/d1-2B` is a 1.92B-parameter **decision model** built on LFM3-VL-2B. You give it a state (text, JSON, images, or a mix) and named questions. It returns calibrated, typed answers in **one forward pass with zero output tokens**. It is not a chat model. ✅ (model card)
 
 This guide uses it as the **decision gate**: a cheap, calibrated "should I act, and how urgent is it?" check. The generative LFM model runs only when the decision says an explanation is worth the tokens.
 
@@ -10,12 +10,11 @@ Markers: ✅ confirmed in the model card, GenieX docs, or our runs on the refere
 
 | | |
 |---|---|
-| Base model | LFM2.5-VL-3B ✅ |
-| Parameters | 3.12B ✅ |
-| Vision encoder | SigLIP2 NaFlex shape-optimized 400M ✅ |
-| Context | 32,768 tokens ✅ |
+| Base model | LFM3-VL-2B ✅ |
+| Parameters | 1.92B ✅ |
+| Context | 128,000 tokens ✅ |
 | Output | Calibrated typed answers, zero output tokens ✅ |
-| Interface (native) | `model.system_one(state, questions, images=None)` and `system_one_batch(...)` ✅ |
+| Interface (native) | `model.system_one(state, questions, media=None)` and `system_one_batch(...)` ✅ |
 | License | LFM Open License v1.0 (tag `lfm1.0`). Read the LICENSE before any public demo. ✅ |
 
 ## Question types
@@ -26,9 +25,9 @@ Markers: ✅ confirmed in the model card, GenieX docs, or our runs on the refere
 |---|---|---|---|
 | `noul` | Yes or no | optional `{"true": …, "false": …}` | `{"type": "noul", "noul": P(yes)}` |
 | `choice` | One of named options | `{name: description}` | `choice`, `confidence`, `probabilities` |
-| `score` | Rating on 2–10 ordered levels | list of level descriptions, lowest first | `score` (expected level index), `confidence`, `probabilities`, `legend` |
+| `score` | Rating on 2–10 ordered levels | list of level descriptions, lowest first | `score` (median level index), `confidence`, `probabilities`, `legend` |
 
-The full response is `{"answers": {name: answer}, "usage": {"input_tokens": n, "output_tokens": 0}}`. We confirmed this shape in `api.py` and on the reference board. ✅
+The full response is `{"answers": {name: answer}, "usage": {"input_tokens": n, "output_tokens": 0}}`. We confirmed this shape in the pinned `api.py`; the board run is pending. ⚠️
 
 ## Why split the work
 
@@ -42,28 +41,25 @@ The architecture diagram, with the LFM generator downstream, is in the [develope
 
 ## Running it on the IQ-9075
 
-The guide runs d1 through the model card's `system_one()` API, in-process with transformers, in fp32 on the CPU. About 4.5 s per state (three questions, one pass). ✅ (measured)
+The guide runs d1 through the model card's `system_one()` API, in-process with transformers, in fp32 on the CPU. d1-2B latency and memory are not yet measured on the IQ-9075. ⚠️
 
 ### Path A: transformers on the CPU
 
-- Requirements: `transformers>=5.14` (installed in a venv), torch and torchvision (CPU builds), pillow. `trust_remote_code=True` runs the repo's code, so review it first.
-- Weights: 6,247 MB safetensors at `~/models/d1-3B`, pinned to commit `051bcc464b01`.
-- Measured: about 4.5 s per state (three questions, one pass), peak RSS 19.4 GB in fp32. bf16 on this CPU is about 5× slower (≈24 s per state) and uses 7.2 GB.
-- Batching does not help on this CPU: three states took about three times one state.
-- Running with the generator: with the LFM server loaded, a decision took about 7.7 s instead of 4.1 s (medians, n=8). System memory peaked at about 18 GB used out of 34 GiB, which fits. ✅ (measured)
-- On the board's own telemetry the gate does not track temperature. Across 75 states from the heat-up run, the correlation between SoC temperature and `p_alert` was −0.08, and it alerted on most states. Its calibration does not carry over to these readings. ✅ (measured; see [`examples/always-on-agent`](../examples/always-on-agent/README.md))
-- Images work through the same API: `state=None` with one image and one `noul` question took about 7.6 s on the reference board. ✅ (measured)
+- Requirements: `transformers>=5.19` (installed in a venv), torch and torchvision (CPU builds), pillow. `trust_remote_code=True` runs the repo's code, so review it first.
+- Weights: 3,836 MB safetensors at `~/models/d1-2B`, pinned to commit `10e7671d44e4`.
+- Measure fp32 and bf16, batching, image latency, peak RSS, and concurrency with the generator before choosing production settings. ⚠️
+- Calibrate on the app's own data; the previous d1-3B thermal result does not transfer.
 - The runnable example, with setup and sample output: [`examples/system-one-decision`](../examples/system-one-decision/README.md).
 
 ### No GenieX decision endpoint
 
-The GenieX docs describe a `POST /v1/systemone` endpoint for this model. It returns `404` on GenieX v0.4.0 and v0.8.0, so this guide does not use it. Recheck `geniex version` and the endpoint before the event. ⚠️
+GenieX decision serving changed after v0.8.0, but it is not yet verified with d1-2B on this board. This guide therefore keeps Path A. ⚠️
 
 ## Model files and disk
 
 | Item | Size | Path on the board | Used by |
 |---|---:|---|---|
-| `d1-3B` safetensors | 6.2 GB | `~/models/d1-3B` | Path A |
+| `d1-2B` safetensors | 3.8 GB | `~/models/d1-2B` | Path A |
 
 The snapshot includes the weights and the repo's Python code. The code runs when `trust_remote_code=True` is set. See [Safety and licensing](#safety-and-licensing).
 
@@ -74,6 +70,6 @@ The snapshot includes the weights and the repo's Python code. The code runs when
 
 ## Safety and licensing
 
-- `trust_remote_code=True` runs code from the model repo. We reviewed the shipped Python in revision `051bcc464b01`: no network calls, no subprocesses, no `eval`/`exec`/`pickle`. Record the commit hash for any future change. ✅ (our review)
+- `trust_remote_code=True` runs code from the model repo. We reviewed all shipped Python in revision `10e7671d44e4`: no subprocess or shell execution and no `eval`/`exec`/pickle. Transformers file helpers resolve the local snapshot when offline. Record the commit hash for any future change. ✅
 - d1 gates actions; it does not replace the allowlist. Only allowlisted actions run, whatever the probabilities say.
-- The LFM Open License v1.0 governs d1-3B. Read the commercial terms before publishing a demo. ✅ (model card)
+- The LFM Open License v1.0 governs d1-2B. Read the commercial terms before publishing a demo. ✅ (model card)

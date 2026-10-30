@@ -6,9 +6,10 @@ GenieX is Qualcomm's local inference stack. This guide uses it for LFM generatio
 
 | Install | Version | Where | Status |
 |---|---|---|---|
-| **Active** | GenieX CLI v0.8.0, QAIRT 2.45, llama.cpp `9425611` | `/usr/local/bin/geniex` → `~/.local/bin/geniex` → `~/.local/share/geniex` | ✅ active since the switch from v0.4.0. LFM NPU decode measured on this build (see [`models.md`](models.md)). |
+| **Migration target** | GenieX CLI v0.10.0 | `~/.local/bin/geniex` → `~/.local/share/geniex` | ⚠️ required for the LFM3 migration; not yet exercised on the reference IQ-9075 |
+| Legacy measured | GenieX CLI v0.8.0, QAIRT 2.45, llama.cpp `9425611` | `/usr/local/bin/geniex` → `~/.local/bin/geniex` → `~/.local/share/geniex` | 🧪 source of the LFM2.5 numbers below |
 
-The docs for `POST /v1/systemone` describe a newer build than v0.4.0. v0.8.0 doesn't have it either. ✅ (both binaries checked with `strings`, and live requests return 404)
+GenieX added decision endpoints after v0.8.0, but this repo keeps d1-2B on Transformers Path A until decision serving is verified on the board.
 
 ## Runtimes
 
@@ -39,12 +40,12 @@ The docs for `POST /v1/systemone` describe a newer build than v0.4.0. v0.8.0 doe
 |---|---|---|
 | `POST /v1/chat/completions` | ✅ works | See the request-field table below |
 | `POST /v1/completions` | ✅ works | `logprobs` returns `400 logprobs is not supported` |
-| `POST /v1/systemone` | ❌ **404** | Documented, but absent from v0.4.0 and v0.8.0 |
+| `POST /v1/systemone` | ⚠️ not used | Absent from v0.4.0/v0.8.0; newer decision serving is not yet verified here |
 | `GET /v1/models` | ✅ | Lists cached models with `:<precision>` suffixes |
 
 ### Chat request fields (what actually takes effect)
 
-Tested on `LiquidAI/LFM2.5-2.6B-GGUF:Q4_0` on v0.4.0, unless noted:
+Legacy results tested on `LiquidAI/LFM2.5-2.6B-GGUF:Q4_0` on v0.4.0/v0.8.0. Re-test these fields on LFM3 with v0.10.0:
 
 | Field | Result | Use it? |
 |---|---|---|
@@ -68,12 +69,12 @@ Not used in this event. The verified route is the HTTP server. We have not run t
 
 `geniex-bench` measures TTFT, prefill, and decode for a GGUF on `llama_cpp`. ✅ (its `--help`)
 
-- **Match the bench to the runtime.** The bench bundles its own `libgeniex.so` and llama.cpp. Decode on the NPU differs a lot between versions: 14.3 tok/s with the v0.4.0 bench against 22.6 with v0.8.0, on the same model and device. Use the v0.8.0 bench to match the active install. ✅ (observed)
+- **Match the bench to the runtime.** Use the v0.10.0 bench for the migration. The historical v0.4.0/v0.8.0 results below apply only to LFM2.5. ✅
 - Put its libraries on the path: `export LD_LIBRARY_PATH=$D/lib:$D/lib/llama_cpp:$D/lib/qairt`. Without it, the binary fails with `libgeniex.so: not found`. ✅ (observed)
 - Defaults: 5 measured runs, 512-token prefill, 128 generated tokens. The summary line is the median run, per the bench docs. ✅ (bench docs). We did not see per-run values.
 - `--output-json-dir` only works in matrix mode (`--matrix-file`). ✅ (observed)
 
-Download: `https://qaihub-public-assets.s3.us-west-2.amazonaws.com/qai-hub-geniex/geniex-bench-linux-arm64-v<VERSION>.tar.gz`. v0.4.0 and v0.8.0 both exist. ✅
+Download: `https://qaihub-public-assets.s3.us-west-2.amazonaws.com/qai-hub-geniex/geniex-bench-linux-arm64-v<VERSION>.tar.gz`. Use the version matching the active runtime.
 
 ## Known gap: server CPU decode
 

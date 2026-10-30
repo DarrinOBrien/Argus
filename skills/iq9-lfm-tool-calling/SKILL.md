@@ -1,24 +1,24 @@
 ---
 name: iq9-lfm-tool-calling
-description: Add tool and function calling to an app on the IQ-9075 with LiquidAI LFM2-1.2B-Tool through GenieX's OpenAI-compatible tools API, with schema validation, an allowlist, and a policy check in code before any write action. Use when the user wants the model to call functions, use tools, drive hardware, or run a multi-step agent loop, or asks about tool_calls on GenieX.
-compatibility: IQ-9075, geniex serve v0.8.0, LiquidAI/LFM2-1.2B-Tool-GGUF:Q4_0 in the cache.
+description: Add tool and function calling to an app on the IQ-9075 with LiquidAI LFM3-1.7B through GenieX's OpenAI-compatible tools API, with schema validation, an allowlist, and a policy check in code before any write action. Use when the user wants the model to call functions, use tools, drive hardware, or run a multi-step agent loop, or asks about tool_calls on GenieX.
+compatibility: Targets IQ-9075, geniex serve v0.10.0, LiquidAI/LFM3-1.7B-GGUF:Q4_0 in the cache. Tool parsing and rates are not yet measured on the board.
 metadata:
   version: "0.1"
 ---
 
-# Tool calling with LFM2-1.2B-Tool
+# Tool calling with LFM3-1.7B
 
 The working reference is `examples/tool-calling/tool_calling.py`, and its README has the measured behaviour. Copy its structure: `TOOLS`, `validate()`, `check_policy()`, `run_tool()`, and `run()`. `python3 tool_calling.py --self-test` checks the guards without a server.
 
-## How the API works on v0.8.0 (measured on the board)
+## How the API works
 
 - Send a standard OpenAI `tools` array to `/v1/chat/completions`. The reply has `message.tool_calls` and `finish_reason: "tool_calls"`. GenieX does the parsing, so don't parse JSON out of the model's text yourself.
 - Send results back as `{"role": "tool", "tool_call_id": ..., "content": json.dumps(result)}` after the assistant message that holds the `tool_calls`.
-- About 0.9 s per model turn (median), and 0.6–1.1 s for a final answer of 25–50 tokens.
+- Measure turn latency and successful tool selection on the board before quoting results.
 - The model sometimes returns two calls in one turn. Run them in order.
-- `LFM2.5-2.6B` is the explainer model. Use `LFM2-1.2B-Tool` for tool calls.
+- `LFM3-1.7B` is the shared explainer and tool-call model.
 
-## What the model gets wrong (all measured; design around each one)
+## What the previous tool model got wrong (keep these guards)
 
 | Behaviour | Guard |
 |---|---|

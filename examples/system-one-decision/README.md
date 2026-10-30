@@ -1,12 +1,12 @@
-# Example: System One decisions with d1-3B (Path A)
+# Example: System One decisions with d1-2B (Path A)
 
-Calls `LiquidAI/d1-3B` through transformers and `trust_remote_code=True`, the path the model card documents. The example asks named questions over a sensor state and gets typed answers back from one forward pass, with zero output tokens. ✅ (model card)
+Calls `LiquidAI/d1-2B` through transformers and `trust_remote_code=True`, the path the model card documents. The example asks named questions over a sensor state and gets typed answers back from one forward pass, with zero output tokens. ✅ (model card)
 
-It shows the three question types: `noul` (yes/no probability), `choice` (one of named options, with probabilities), and `score` (expected level on an ordered scale). It also covers an image question and a packed batch.
+It shows the three question types: `noul` (yes/no probability), `choice` (one of named options, with probabilities), and `score` (median level on an ordered scale). It also covers an image question and a packed batch.
 
-Verified on the team's IQ-9075 with the steps below. Sample output: [`sample-output-fp32.txt`](sample-output-fp32.txt).
+The code path is statically tested, but d1-2B still needs an IQ-9075 run. The checked-in [`sample-output-fp32.txt`](sample-output-fp32.txt) is the historical d1-3B baseline, not an LFM3 result.
 
-This is Path A: the model card's API, run in-process on the CPU. It is the board's decision route. The GenieX `POST /v1/systemone` endpoint from the docs is not available in the GenieX builds we tested (v0.4.0 and v0.8.0, both 404).
+This is Path A: the model card's API, run in-process on the CPU. It remains the board's decision route until GenieX decision serving is verified with d1-2B.
 
 ## What is already on the board
 
@@ -30,10 +30,10 @@ The torch build is tagged `+cu130`, but this board has no CUDA device, so CPU is
 | Piece | Version | Notes |
 |---|---|---|
 | venv `~/.venvs/d1` | — | created with `--system-site-packages` so it reuses the torch and torchvision above |
-| transformers | 5.19.0 | requirement is `>=5.14` ✅ |
+| transformers | 5.19.0 or newer | requirement is `>=5.19` ✅ |
 | huggingface_hub | 1.33.0 | pulled in by transformers; used by `fetch_d1.py` |
 | tokenizers, safetensors, regex, typer, rich, shellingham, annotated-doc, idna | pulled in by transformers | — |
-| `~/models/d1-3B` | commit `051bcc464b01` | 5.9 GB. Includes the weights and the repo's Python code. |
+| `~/models/d1-2B` | commit `10e7671d44e4` | 3.8 GB weights plus tokenizer and code. |
 
 A dry run confirmed pip would only add transformers and its dependencies. It would not replace torch, torchvision, or pillow. ✅
 
@@ -51,8 +51,8 @@ python -m pip install -U pip
 cd examples/system-one-decision          # from the repo root
 python -m pip install -r requirements.txt
 
-# 3. the pinned d1-3B snapshot (about 6.2 GB, Hub needed once)
-python fetch_d1.py --dest ~/models/d1-3B
+# 3. the pinned d1-2B snapshot (about 3.8 GB, Hub needed once)
+python fetch_d1.py --dest ~/models/d1-2B
 
 # 4. confirm the stack
 python check_env.py
@@ -60,18 +60,18 @@ python check_env.py
 
 `fetch_d1.py` pins the commit in one place (`REVISION`). It writes a `REVISION` file into the model directory, and `check_env.py` compares it against the pin.
 
-Before you change the pin, review the remote code. `trust_remote_code=True` runs it. This example's review covered `modeling_d1.py`, `api.py`, `runner.py`, `hybrid.py`, `prompt.py`, and `lfm2_vl.py`. Nothing in them makes network calls, starts subprocesses, or uses `eval`/`exec`/`pickle`. The only Hub access is a `from_pretrained` call that points at the local directory. ✅ (read and grep of revision `051bcc464b01`) Note that `hybrid.py` describes the LFM hybrid architecture (convolution plus attention). It has nothing to do with GenieX's `--compute hybrid`.
+Before you change the pin, review the remote code. `trust_remote_code=True` runs it. This review covered every shipped Python file in revision `10e7671d44e4`, including the d1 API/runner, LFM3/VL model code, processors, parsing, calibration, and media helpers. Nothing starts subprocesses or uses shell execution, `eval`, `exec`, or pickle. The only Hub helpers are Transformers loaders; with the local model directory and offline environment variables, they resolve local files. ✅
 
 ## Run
 
 ```bash
-python system_one_example.py --model-dir ~/models/d1-3B --log decisions.jsonl
+python system_one_example.py --model-dir ~/models/d1-2B --log decisions.jsonl
 python system_one_example.py --dtype bfloat16 --log decisions_bf16.jsonl   # slower, see below
 ```
 
 Each decision is appended as one JSON line to `--log`. The alert threshold (`ALERT_THRESHOLD = 0.5`) is an example value. Tune it on states you have labeled yourself.
 
-### What it prints (fp32, abridged; full output in `sample-output-fp32.txt`)
+### Historical d1-3B output
 
 ```
 loaded /home/ubuntu/models/d1-3B as float32 in 3.0 s, threads=8
@@ -90,7 +90,7 @@ batch of 3 in 13724.1 ms total
 
 Read these as plausibility checks, not validation. The three states are the examples in the script. The third state sits just above the threshold, so a small change in input flips the alert.
 
-## Measured on the IQ-9075
+## Historical d1-3B measurements on the IQ-9075
 
 | | fp32 (default) | bf16 |
 |---|---:|---:|
@@ -101,7 +101,9 @@ Read these as plausibility checks, not validation. The three states are the exam
 | Peak RSS | 19.4 GB | 7.2 GB |
 | Full run, wall clock | 50 s | 206 s |
 
-Notes:
+These numbers do not describe d1-2B. Re-run the example and record the d1-2B result before the demo.
+
+Notes from the previous stack:
 - **Use fp32 on this board.** bf16 is about 5× slower on this CPU, so it is kept only as a memory option.
 - **Batching does not help on CPU.** The card's batch speedup is for GPUs. Here three states cost about three times one state.
 - **Decisions are about 4.5 s each.** That is fine for a slow monitoring loop and too slow for anything faster. Plan the loop around it.
@@ -115,5 +117,5 @@ Notes:
 | `check_env.py` fails on `pinned revision` | Weights were downloaded without `fetch_d1.py` | Run `python fetch_d1.py` again. It reuses the local files and writes the `REVISION` marker. |
 | `ModuleNotFoundError` for transformers | Venv not activated | `source ~/.venvs/d1/bin/activate` |
 | torch and torchvision mismatch | torchvision version does not match the torch build | Keep the system torch and install the matching torchvision (0.26.0 for torch 2.11.0) |
-| Out of memory with fp32 | Other large models resident | Use `--dtype bfloat16` (7 GB peak), or stop other servers |
+| Out of memory with fp32 | Other large models resident | Stop other servers, or measure `--dtype bfloat16` before relying on it |
 | Slow first call | Setup cost on first use | The example makes a warm-up call before timing |

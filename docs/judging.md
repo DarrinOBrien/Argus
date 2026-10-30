@@ -40,6 +40,6 @@ Record the numbers that support these claims. See [`runtimes.md`](runtimes.md) f
 | Time-to-first-token | `geniex-bench`, or a timed streamed request to the server | Responsiveness |
 | Decode tokens/s | `geniex-bench`, or tokens over time from a streamed request | Endurance and feel |
 | Peak memory | `free -h` or `top` during a run | Footprint |
-| Decision-gate latency | Timed decisions on the board: Path A on the CPU is about 4.5 s per state (three questions) | Shows whether the gate fits your observation rate. Model-card latencies are for other hardware. |
+| Decision-gate latency | Time d1-2B Path A on the board for the exact questions your app uses | Shows whether the gate fits your observation rate. The old d1-3B and model-card latencies do not apply. |
 | Network-off run | Demo with Ethernet and Wi-Fi unplugged | The core claim |
 | Decision log | Local file with timestamps | Proof the loop ran |

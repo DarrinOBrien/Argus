@@ -1,6 +1,6 @@
 ---
 name: iq9-preflight
-description: Check that a Dragonwing IQ-9075 board is ready for the LiquidAI hackathon stack (GenieX v0.8.0, NPU device nodes, cached LFM models, the d1-3B venv and pinned snapshot, disk, memory, thermal sensors, network state). Use at the start of a session, before building or demoing, when something "suddenly stopped working", or when the user asks "is my board ready".
+description: Check that a Dragonwing IQ-9075 board is ready for the LiquidAI hackathon stack (GenieX v0.10.0, NPU device nodes, cached LFM3 model, the d1-2B venv and pinned snapshot, disk, memory, thermal sensors, network state). Use at the start of a session, before building or demoing, when something "suddenly stopped working", or when the user asks "is my board ready".
 compatibility: Run on the IQ-9075 itself (bash, coreutils, curl, python3). From a laptop, run it over SSH.
 metadata:
   version: "0.1"
@@ -30,9 +30,8 @@ ssh "$IQ9_HOST" 'bash -s -- --json' < skills/iq9-preflight/scripts/preflight.sh
 | Check | What it means when it isn't ok |
 |---|---|
 | `npu-nodes`, `npu-access` | The NPU is unusable, and GenieX will quietly use the CPU instead (about 2.8 tok/s through the server, against about 23 on the NPU) |
-| `geniex` WARN | The version differs from v0.8.0, so the numbers and workarounds in `docs/` may not hold. Don't upgrade during the event |
-| `model:LiquidAI/LFM2.5-2.6B-GGUF` | The generator is missing. Pull it once, while the network is up |
-| `model:LiquidAI/LFM2-1.2B-Tool-GGUF` WARN | Needed only for tool calling |
+| `geniex` WARN | The version differs from v0.10.0, so the LFM3 path may not hold. Don't change versions between rehearsal and demo |
+| `model:LiquidAI/LFM3-1.7B-GGUF` | The shared generator/tool model is missing. Pull it once, while the network is up |
 | `d1-venv`, `d1-snapshot` | The decision gate can't run. Follow `examples/system-one-decision/README.md` |
 | `server` WARN | Normal if nothing has started it yet. See the `iq9-geniex-lfm` skill |
 | `disk` WARN | Under 10 GB free. Run `geniex list` and ask the user before removing anything |

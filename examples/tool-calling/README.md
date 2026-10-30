@@ -1,11 +1,11 @@
-# Example: tool calling with LFM2-1.2B-Tool
+# Example: tool calling with LFM3-1.7B
 
 The model chooses a tool and fills in its arguments. The code does everything else. It checks the arguments against a schema, runs only tools on the allowlist, applies its own rule before any write action, runs the tool, and logs each step. The code, not the model, decides whether something happens.
 
 Script: [`tool_calling.py`](tool_calling.py). Standard library only, so no venv is needed.
 
 ```
-prompt ─→ LFM2-1.2B-Tool (GenieX, NPU) ─→ tool_calls ─→ validate ─→ allowlist ─→ policy ─→ run ─→ result back to the model
+prompt ─→ LFM3-1.7B (GenieX, NPU) ─→ tool_calls ─→ validate ─→ allowlist ─→ policy ─→ run ─→ result back to the model
                     ▲                                                                                      │
                     └─────────────────────────────── up to --max-steps turns ───────────────────────────────┘
 ```
@@ -13,8 +13,8 @@ prompt ─→ LFM2-1.2B-Tool (GenieX, NPU) ─→ tool_calls ─→ validate ─
 ## Prerequisites
 
 ```bash
-geniex list                                        # look for LiquidAI/LFM2-1.2B-Tool-GGUF  Q4_0
-geniex pull LiquidAI/LFM2-1.2B-Tool-GGUF:Q4_0      # only if it is missing (696 MB)
+geniex list                                   # look for LiquidAI/LFM3-1.7B-GGUF  Q4_0
+geniex pull LiquidAI/LFM3-1.7B-GGUF:Q4_0      # only if it is missing (about 1.05 GB)
 geniex serve --compute npu                         # keep this running in another terminal
 ```
 
@@ -30,7 +30,7 @@ python3 tool_calling.py --prompt "Is the board too hot? If so, log a note for th
 | Option | Default | Meaning |
 |---|---|---|
 | `--prompt` | a question about temperature and CPU load | user message |
-| `--model` | `LiquidAI/LFM2-1.2B-Tool-GGUF:Q4_0` | any cached model whose chat template supports tools |
+| `--model` | `LiquidAI/LFM3-1.7B-GGUF:Q4_0` | any cached model whose chat template supports tools |
 | `--server` | `http://127.0.0.1:18181` | GenieX server |
 | `--max-steps` | 4 | model turns before it stops |
 | `--max-tokens` | 128 | cap per turn, sent as `max_completion_tokens` |
@@ -49,7 +49,7 @@ Anything else is refused. A refusal goes back to the model as the tool result (`
 
 ## How it works
 
-GenieX handles the tool-call format. You send the standard OpenAI `tools` array to `/v1/chat/completions`. The server reads the call from the model's output and returns it as `message.tool_calls`, with `finish_reason: "tool_calls"`. ✅ ([GenieX local server docs](https://geniex.aihub.qualcomm.com/en/run/cli/local-server#tool-calling); confirmed on the IQ-9075 with v0.8.0) You don't have to parse the JSON out of the model's text yourself.
+GenieX handles the tool-call format. You send the standard OpenAI `tools` array to `/v1/chat/completions`; the expected reply carries `message.tool_calls` with `finish_reason: "tool_calls"`. The self-test covers every code-side guard, but LFM3 parsing still needs an IQ-9075 integration run. ⚠️
 
 | Step | Function | Notes |
 |---|---|---|
@@ -60,9 +60,9 @@ GenieX handles the tool-call format. You send the standard OpenAI `tools` array 
 | Policy | `check_policy()` | Write tools need a rule that passes in code. Read-only tools always pass. |
 | Run and log | `run_tool()`, `run()` | Results go back as `role: tool` messages. The final summary lists the actions that ran, taken from the code's own record. |
 
-## Measured on the IQ-9075 (GenieX v0.8.0, warm server)
+## Historical LFM2-1.2B-Tool measurements
 
-15 runs (3 prompts × 5), 28 model turns:
+These v0.8.0 results justify the guards but are not LFM3 measurements. Re-run the same 15 cases before the demo.
 
 | | Result |
 |---|---|
@@ -107,7 +107,7 @@ One JSON line per model turn and per tool call, then a summary line:
 | Symptom | Fix |
 |---|---|
 | `no GenieX server at ...` | Start `geniex serve --compute npu`. |
-| HTTP 404 or 500 naming the model | `geniex list`, then pull `LiquidAI/LFM2-1.2B-Tool-GGUF:Q4_0`. |
+| HTTP 404 or 500 naming the model | `geniex list`, then pull `LiquidAI/LFM3-1.7B-GGUF:Q4_0`. |
 | `tool_calls` always empty | Check that the request sends `tools`, and that the model's chat template supports tools. |
 | `{"error": "no readable thermal zones ..."}` | You are not on the board. The read tools need its `/sys` and `/proc`. |
 | Final answer says it did something that isn't in `actions that ran` | Expected: the model claims actions it never took. Trust the summary, not the model's text. |

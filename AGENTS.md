@@ -6,9 +6,8 @@ Instructions for coding agents (Claude Code, Codex, Cursor, Copilot, Gemini, pi,
 
 A knowledge base and set of working examples for one target: the **Dragonwing IQ-9075 EVK** (QCS9075, Hexagon v73 NPU, 36 GB, Ubuntu 24.04 aarch64) running LiquidAI models:
 
-- **Generator:** `LiquidAI/LFM2.5-2.6B-GGUF:Q4_0` through **GenieX v0.8.0** (`geniex serve`, OpenAI-compatible, `127.0.0.1:18181`, NPU).
-- **Decision gate:** `LiquidAI/d1-3B` through **transformers on the CPU** ("Path A"), from a local snapshot at `~/models/d1-3B`.
-- **Tool calls:** `LiquidAI/LFM2-1.2B-Tool-GGUF:Q4_0` through the same server.
+- **Generator and tool calls:** `LiquidAI/LFM3-1.7B-GGUF:Q4_0` through **GenieX v0.10.0** (`geniex serve`, OpenAI-compatible, `127.0.0.1:18181`, NPU).
+- **Decision gate:** `LiquidAI/d1-2B` through **transformers on the CPU** ("Path A"), from a local snapshot at `~/models/d1-2B`.
 
 Every project's final demo runs **with the network unplugged**. Assume that from the first line of code.
 
@@ -39,14 +38,14 @@ If your agent doesn't load skills automatically, read the `SKILL.md` directly. T
 
 ## Rules (each one comes from a failure we measured on the board)
 
-1. **Cap every LFM call.** Use `max_completion_tokens` on chat and `max_tokens` on `/v1/completions`. Without a cap, LFM2.5-2.6B ran 200–1,400 tokens for a one-sentence request.
-2. **LFM2.5-2.6B puts its reasoning in chat replies.** For a direct answer, use a raw completion with `<think>\n\n</think>\n\n` already closed (`lfm_client.LFM().sentence()`). `enable_think`, `stop`, and `reasoning_format` don't change this.
-3. **Treat `completion_tokens: 0` as a failure.** GenieX v0.8.0 returns empty replies after a few identical prompts. Make prompts unique, retry once with a tag, then run `serve.sh restart`.
-4. **Never use `POST /v1/systemone`.** It returns 404 on v0.4.0 and v0.8.0. Run d1 through transformers (`trust_remote_code=True`, fp32, CPU), loaded once.
+1. **Cap every LFM call.** Use `max_completion_tokens` on chat and `max_tokens` on `/v1/completions`.
+2. **LFM3-1.7B reasons by default.** For a direct answer, use a raw completion with `<think>\n\n</think>\n\n` already closed (`lfm_client.LFM().sentence()`). Re-test this behavior on the board before quoting it.
+3. **Treat `completion_tokens: 0` as a failure.** Make prompts unique, retry once with a tag, then run `serve.sh restart`.
+4. **Use Path A for d1 in this repo.** Run d1-2B through transformers (`trust_remote_code=True`, fp32, CPU), loaded once. GenieX decision serving is not yet verified on this board.
 5. **Load models from local paths only.** No Hugging Face repo IDs in app code, and no `geniex pull`, `pip install`, CDN assets, or telemetry at runtime.
-6. **Keep d1 and the LFM sequential.** The gate goes from about 4.1 s to about 7.7 s when a generation runs at the same time.
-7. **Calibrate d1. Don't trust 0.5.** On the board's own thermal readings, d1 didn't track temperature (r = −0.08). Use `calibrate_threshold.py`, or a rule.
-8. **The model proposes; code decides.** Validate tool arguments against a schema, run only allowlisted actions, put a policy in code in front of any write or real-world action, and report actions from your own record. LFM2-1.2B-Tool over-alerts and claims actions it never took.
+6. **Keep d1 and the LFM sequential.** The previous stack's gate went from about 4.1 s to about 7.7 s during generation; re-measure before changing this rule.
+7. **Calibrate d1. Don't trust 0.5.** The previous d1-3B gate did not track the board's thermal readings; d1-2B needs fresh calibration. Use `calibrate_threshold.py`, or a rule.
+8. **The model proposes; code decides.** Validate tool arguments against a schema, run only allowlisted actions, put a policy in code in front of any write or real-world action, and report actions from your own record.
 9. **Log every iteration** as flushed JSONL. That log is the offline proof judges look for.
 10. **Use the NPU.** If the server log doesn't show `Using 1 device(s): HTP0`, the server is on the CPU (about 2.8 tok/s). Fix the drivers. Don't switch to `--compute cpu`.
 
@@ -54,8 +53,8 @@ If your agent doesn't load skills automatically, read the `SKILL.md` directly. T
 
 - Run `sudo`, `apt`, `usermod`, or anything that changes the system.
 - Run `geniex pull` (check `geniex list` and `df -h /` first, and **never re-pull** a model that's already cached), `geniex remove`, `geniex clean`, or `fetch_d1.py`.
-- Install, upgrade, or reinstall GenieX. Every number here is for v0.8.0.
-- Move the d1 revision pin (`051bcc464b01`). `trust_remote_code` runs the repo's Python code, so review it first.
+- Install, upgrade, or reinstall GenieX. The active target is v0.10.0; legacy numbers in `docs/` are labeled with the version that produced them.
+- Move the d1 revision pin (`10e7671d44e4`). `trust_remote_code` runs the repo's Python code, so review it first.
 - Bind `geniex serve` to anything other than loopback, or cut the network. Over SSH, cutting the network also cuts your own session.
 - Delete anything under `~/models` or `~/.cache/geniex`.
 

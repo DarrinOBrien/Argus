@@ -18,7 +18,7 @@ python3 skills/iq9-offline-rehearsal/scripts/offline_audit.py apps/<name>
 
 | Finding | Fix |
 |---|---|
-| `hub-id` (error) | Load from a local path: `~/models/d1-3B`, or the model name in the GenieX cache through `geniex serve` |
+| `hub-id` (error) | Load from a local path: `~/models/d1-2B`, or the model name in the GenieX cache through `geniex serve` |
 | `pull` (error) | Move `geniex pull`, `pip install`, `npm install`, and `apt install` into a setup step that runs before the cut. Never at runtime |
 | `cdn` (error) | Vendor the JS and CSS into the app, and serve them locally |
 | `url` (warn) | Every non-localhost URL has to be optional, or gone. Check each one |
@@ -31,10 +31,10 @@ It's a static check, so it misses dependencies that phone home on their own. Ste
 
 Check `df -h /` first. Pull only what is missing, and ask before pulling anything over 1 GB.
 
-- [ ] Run `geniex list` and confirm every model the app uses is cached. Run `geniex version` and confirm v0.8.0.
-- [ ] Confirm `~/models/d1-3B/REVISION` reads `051bcc464b01…` (run `skills/iq9-preflight/scripts/preflight.sh`).
+- [ ] Run `geniex list` and confirm every model the app uses is cached. Run `geniex version` and confirm v0.10.0.
+- [ ] Confirm `~/models/d1-2B/REVISION` reads `10e7671d44e4…` (run `skills/iq9-preflight/scripts/preflight.sh`).
 - [ ] Download wheels for an offline reinstall: `~/.venvs/d1/bin/python -m pip download -r <app>/requirements.txt -d ~/wheels`, then test `pip install --no-index --find-links ~/wheels -r <app>/requirements.txt` in a scratch venv.
-- [ ] Keep the GenieX archive `geniex-cli-linux-arm64-v0.8.0.tar.gz` and `install.sh`.
+- [ ] Keep the GenieX archive `geniex-cli-linux-arm64-v0.10.0.tar.gz` and `install.sh`.
 - [ ] Put sample and recorded data for the demo on the board (in case a sensor fails).
 - [ ] Clone this repo onto the board, so the docs and skills are there offline.
 
@@ -56,7 +56,7 @@ IF=$(ip route | awk '/default/ {print $5; exit}'); sudo ip link set "$IF" down; 
 
 ## 4. Recovery drill (T-1)
 
-- A second generator you can switch to with one flag (for example `--llm LiquidAI/LFM2-1.2B-Tool-GGUF:Q4_0`).
+- Keep the previous `LFM2.5-2.6B` stack cached as the rollback path until LFM3 passes rehearsal.
 - A recorded decision log and a recorded video, in case the live demo fails.
 - Know where the log lives, and have a one-line command ready to show its last entries.
 - `serve.sh restart` memorised, for the zero-token state.

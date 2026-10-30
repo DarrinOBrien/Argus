@@ -1,17 +1,17 @@
-# Example: GenieX on the NPU with LFM2.5-2.6B
+# Example: GenieX on the NPU with LFM3-1.7B
 
-Starts `geniex serve --compute npu`, sends one capped chat request to LFM2.5-2.6B, prints the reply and token counts, and stops the server it started. Standard library only, so no venv is needed.
+Starts `geniex serve --compute npu`, sends one capped chat request to LFM3-1.7B, prints the reply and token counts, and stops the server it started. Standard library only, so no venv is needed.
 
 Script: [`serve_lfm_npu.py`](serve_lfm_npu.py)
 
 ## Prerequisites
 
-- GenieX CLI v0.8.0 on the PATH. Install it below.
+- GenieX CLI v0.10.0 on the PATH. Install it below.
 - The model in the GenieX cache. The script checks this and does not download:
 
   ```bash
-  geniex list                                       # look for LiquidAI/LFM2.5-2.6B-GGUF  Q4_0
-  geniex pull LiquidAI/LFM2.5-2.6B-GGUF:Q4_0        # only if it is missing
+  geniex list                                  # look for LiquidAI/LFM3-1.7B-GGUF  Q4_0
+  geniex pull LiquidAI/LFM3-1.7B-GGUF:Q4_0     # only if it is missing
   ```
 
 - Python 3.
@@ -28,19 +28,19 @@ sudo apt-get install -y qcom-adreno1 qcom-fastrpc1 libqnn1
 Install the version this example was tested on:
 
 ```bash
-curl -fsSL https://qaihub-public-assets.s3.us-west-2.amazonaws.com/qai-hub-geniex/install.sh | sh -s -- --version v0.8.0
+curl -fsSL https://qaihub-public-assets.s3.us-west-2.amazonaws.com/qai-hub-geniex/install.sh | sh -s -- --version v0.10.0
 ```
 
 - As a regular user, the install goes to `~/.local/share/geniex`, and the launcher goes to `~/.local/bin/geniex`. If the installer says `~/.local/bin` is not on your PATH, add it (`export PATH="$HOME/.local/bin:$PATH"` in your shell profile). As root, it goes to `/usr/local/lib/geniex` and `/usr/local/bin`.
 - Leave out `--version` to get the newest stable release instead. That may not match the version this example was tested on.
 - Installing over an existing GenieX replaces it. The installer moves the old install aside and deletes it after the new one is in place. Back up the old install first if you need it.
 - `geniex update` does not install anything. It only prints the install command.
-- The installer downloads `geniex-cli-linux-arm64-v0.8.0.tar.gz`. Keep that archive if the board will be offline later.
+- Keep the downloaded `geniex-cli-linux-arm64-v0.10.0.tar.gz` archive if the board will be offline later.
 
 Check the install:
 
 ```bash
-geniex version              # GenieX CLI Version: v0.8.0, LlamaCPP Runtime Hash: 9425611
+geniex version              # expect GenieX CLI Version: v0.10.0
 geniex config get chipset   # Dragonwing IQ-9075 EVK
 ```
 
@@ -77,7 +77,7 @@ One request is one HTTP call, so a shell version works for a quick check:
 geniex serve --compute npu > serve.log 2>&1 &
 for i in $(seq 1 60); do curl -s -o /dev/null http://127.0.0.1:18181/v1/models && break; sleep 1; done
 curl -s http://127.0.0.1:18181/v1/chat/completions -H "Content-Type: application/json" \
-  -d '{"model":"LiquidAI/LFM2.5-2.6B-GGUF:Q4_0","messages":[{"role":"user","content":"Say hi."}],"max_completion_tokens":32,"compute":"npu","stream":false}'
+  -d '{"model":"LiquidAI/LFM3-1.7B-GGUF:Q4_0","messages":[{"role":"user","content":"Say hi."}],"max_completion_tokens":32,"compute":"npu","stream":false}'
 # stop the process that holds the port; kill $! does not reach the server
 kill "$(ss -ltnp | sed -n 's/.*127.0.0.1:18181.*pid=\([0-9]*\).*/\1/p')"
 ```
@@ -87,14 +87,14 @@ The script exists for the parts that shell gets wrong or leaves out:
 - **Cleanup.** `$!` is the launcher, not the server. In our test, `kill $!` left the server running and answering on the port. The script stops the process it started in a `finally` block. We tested the normal path, which left no server running. We have not tested a failed request.
 - **Readiness with a timeout.** It polls until the server answers, fails with the log path if the server exits or doesn't answer in time, and never waits forever.
 - **Reuse.** If a server is already on the port, it uses that server and doesn't start a second one.
-- **Request fields that are easy to get wrong.** `max_completion_tokens` (`max_tokens` was ignored on v0.4.0; both work on v0.8.0), `stream: false` (one JSON reply per call; streaming is not the cause of zero-token replies on v0.8.0, see [`docs/runtimes.md`](../../docs/runtimes.md#known-gap-zero-token-responses-on-v080)), and `compute` on every request.
+- **Request fields that are easy to get wrong.** Use `max_completion_tokens`, `stream: false` for one JSON reply, and `compute: npu` on every request.
 - **Output that matches this model.** The reply usually contains reasoning, so the script prints token counts and warns when the cap is hit.
 
 Use the shell version for a one-off check. Use the script for runs you repeat or that have to clean up after themselves.
 
 ## Expected output
 
-Measured on the team IQ-9075 with GenieX v0.8.0 and `--max-tokens 128`. This run started the server, so the time includes the model load (about 5 s). A 128-token request on a warm server took about 5.5 s (about 23 tok/s) in our tests:
+The output below is the historical LFM2.5-2.6B result on GenieX v0.8.0. It is retained as a regression baseline and is not an LFM3 measurement:
 
 ```
 starting geniex serve --compute npu ...
@@ -103,15 +103,15 @@ The user wants a one-sentence explanation of why on-device inference is benefici
 
 finish_reason=length prompt_tokens=27 completion_tokens=128
 end-to-end 11.04 s (11.6 tok/s, includes prefill)
-Hit the cap. LFM2.5-2.6B writes its reasoning into the answer; raise --max-tokens or make the prompt narrower.
+Hit the cap. LFM2.5-2.6B includes reasoning in the answer; raise --max-tokens or make the prompt narrower.
 ```
 
-The reply is the model's reasoning, not just the answer. That is normal for this model (see below).
+The reply is the legacy model's reasoning, not just the answer.
 
 ## Things to know
 
 - **Use `max_completion_tokens`.** v0.4.0 ignored `max_tokens`. v0.8.0 honours both, and `max_completion_tokens` wins if both are set. The script sends `max_completion_tokens`, which works on both versions. ✅ (measured)
-- **LFM2.5-2.6B writes its reasoning into the reply.** A one-sentence request can run for hundreds of tokens. Keep the cap low, and check `finish_reason=length`.
+- **Inspect LFM3 output on the board.** Keep the cap low and check `finish_reason` before raising it.
 - **Zero-token replies.** After several identical requests, GenieX v0.8.0 can return a reply with no tokens (`completion_tokens: 0`). Streaming is not the cause. The script detects this, prints a warning, and exits with code 2. Restart `geniex serve` to clear it. See [`docs/runtimes.md`](../../docs/runtimes.md#known-gap-zero-token-responses-on-v080).
 - **Cold start.** The script starts the server, so its first request includes the model load. To see warm timing, run it with `--keep-running`, then run it again. The second run reuses the server. The server unloads the model after 300 s idle by default. See [`docs/runtimes.md`](../../docs/runtimes.md#server-lifecycle-model-loading-and-idle-unloading).
 - **`geniex serve` runs on loopback only** (`127.0.0.1:18181`).
@@ -120,7 +120,7 @@ The reply is the model's reasoning, not just the answer. That is normal for this
 
 | Symptom | Fix |
 |---|---|
-| `... is not in the GenieX cache` | `geniex pull LiquidAI/LFM2.5-2.6B-GGUF:Q4_0` |
+| `... is not in the GenieX cache` | `geniex pull LiquidAI/LFM3-1.7B-GGUF:Q4_0` |
 | `geniex serve exited with code ...` | Read the log (default `geniex-serve.log`) |
 | `did not answer ... within 60 s` | Raise `--startup-timeout`; the first load can take a while |
 | Reply is empty or cut off | Raise `--max-tokens`; check `finish_reason` |

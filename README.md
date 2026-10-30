@@ -9,8 +9,8 @@ Reference documentation for the hackathon: build on-device AI agents with **Liqu
 ## Platform and models
 
 * **Hardware:** Dragonwing IQ-9075 EVK only (QCS9075, Hexagon v73 NPU, 36 GB LPDDR5).
-* **Generator:** `LiquidAI/LFM2.5-2.6B-GGUF` (Q4_0) via GenieX v0.8.0.&#x20;
-* **Decision layer:** `LiquidAI/d1-3B`, a decision model that answers yes/no, category, and severity questions in one pass with no output tokens.
+* **Generator and tools:** `LiquidAI/LFM3-1.7B-GGUF` (Q4_0) via GenieX v0.10.0.
+* **Decision layer:** `LiquidAI/d1-2B`, a decision model that answers typed questions in one pass with no output tokens.
 * **Other LFM models** can be pulled through GenieX. Test each one on the board before a demo.
 
 ## Goals
@@ -44,32 +44,31 @@ Judging weights and the "why not just a cloud API call?" question are in [`docs/
 | ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
 | `README.md`                     | This file: goals, objectives, repo map                                                                                           |
 | `docs/developer-guide.md`       | Main guide: setup → first model → server → decision and generation loop → offline                                                |
-| `docs/decision-models.md`       | d1-3B: question types, Path A on the IQ-9075, disk and memory budget                                                             |
-| `docs/models.md`                | LiquidAI catalog: the recommended 2.6B with measured numbers, d1, other LFM models                                               |
+| `docs/decision-models.md`       | d1-2B: question types and Path A on the IQ-9075                                                                                   |
+| `docs/models.md`                | Active LFM3/d1 models plus the previous stack's measured regression baseline                                                     |
 | `docs/runtimes.md`              | GenieX versions, CLI, server endpoints and request fields, benchmarking, pitfalls                                                |
 | `docs/hardware.md`              | IQ-9075 facts, team board state, driver packages                                                                                 |
 | `docs/offline-readiness.md`     | Pre-cut checklist and network-off rehearsal                                                                                      |
 | `docs/judging.md`               | Scoring rubric, demo format, metrics to show                                                                                     |
 | `examples/system-one-decision/` | Path A: `system_one()` with transformers. Installation, pinned fetch, environment check, example.                                |
-| `examples/lfm-server-npu/`      | LFM2.5-2.6B: start `geniex serve` on the NPU, send one capped chat request, stop it                                              |
+| `examples/lfm-server-npu/`      | LFM3-1.7B: start `geniex serve` on the NPU, send one capped chat request, stop it                                                |
 | `examples/always-on-agent/`     | The always-on loop, runnable: observe, decide (d1), act through an allowlist, explain alerts (LFM, raw completion), log to JSONL |
-| `examples/tool-calling/`        | LFM2-1.2B-Tool: native `tools` calls, schema validation, allowlist, and a policy check before any write action |
+| `examples/tool-calling/`        | LFM3-1.7B: native `tools` calls, schema validation, allowlist, and a policy check before any write action |
 | `starter/`                      | `run.sh`: checks the board, runs one decision pass and one generation, and points to the next example |
 | `skills/`                       | Agent skills with tested scripts: preflight, GenieX/LFM client, d1 calibration, agent scaffold, tool calling, offline audit, demo metrics. Start with [`AGENTS.md`](AGENTS.md) |
 | `AGENTS.md`                     | Instructions for coding agents: rules, skills, where to run, what to ask before doing |
 | `apps/`                         | Where hackathon projects go (`skills/iq9-always-on-agent/scripts/scaffold.sh apps/<name>`) |
 
-The event commits to a "Five-Minute Start" in which an inference sample, local agent, tool-call example, and starter repository already work. All four pieces are included in this repository.
+The event commits to a "Five-Minute Start" with an inference sample, local agent, tool-call example, and starter repository. All four pieces are included; run the migrated stack on the board before the demo.
 
 ## Known limits
 
-* **`POST /v1/systemone` is not available** in GenieX v0.4.0 or v0.8.0 (the latest stable release). Use Path A for decisions.
-* **`max_tokens` was ignored on v0.4.0.** It works on v0.8.0. If both fields are set, `max_completion_tokens` wins. Use `max_completion_tokens` in all examples.
-* **LFM2.5-2.6B writes its reasoning into the answer.** Cap every call. Chat replies carry the reasoning; the always-on agent uses a raw completion with the reasoning block closed (see [`examples/always-on-agent`](examples/always-on-agent/README.md)).
-* **Zero-token replies on v0.8.0.** After several identical requests, `geniex serve` returns HTTP 200 with no tokens. This affects streamed and non-streamed calls alike. Restart the server and vary the prompt. See [`docs/runtimes.md`](docs/runtimes.md#known-gap-zero-token-responses-on-v080).
-* **Model unloads after 300 s idle** (default keepalive). The next request takes about 5 s longer. Change it with `--keepalive` or `GENIEX_KEEPALIVE`. See [`docs/runtimes.md`](docs/runtimes.md#server-lifecycle-model-loading-and-idle-unloading).
-* **The decision gate slows down while the generator runs.** Measured on the IQ-9075: about 4 s per decision alone and about 7.7 s during a generation. The generator is barely affected. Keep the loop sequential (gate, then explanation). See [`docs/developer-guide.md`](docs/developer-guide.md) §8.
-* **The decision gate does not track board temperature.** Measured on the IQ-9075: on the board's own readings, it alerted on most states and its probability did not follow temperature. Calibrate on labeled board data before use. See [`examples/always-on-agent`](examples/always-on-agent/README.md).
+* **d1-2B uses Path A in this repo.** GenieX decision serving has not been verified on the IQ-9075 with this stack.
+* **Use `max_completion_tokens` on chat calls.** Cap every request and keep the zero-token retry as a defensive fallback.
+* **LFM3-1.7B reasons by default.** The always-on agent uses a raw completion with the reasoning block closed; verify the output on the board before the demo.
+* **Model unloads after 300 s idle** (default keepalive). The previous model's next request took about 5 s longer; measure LFM3. Change the keepalive with `--keepalive` or `GENIEX_KEEPALIVE`. See [`docs/runtimes.md`](docs/runtimes.md#server-lifecycle-model-loading-and-idle-unloading).
+* **Keep the gate and generator sequential until measured.** On the previous stack, a decision rose from about 4 s alone to about 7.7 s during generation. See [`docs/developer-guide.md`](docs/developer-guide.md) §8.
+* **Calibrate the new decision gate.** The previous d1-3B gate did not track the board's thermal readings; do not carry its threshold over to d1-2B. See [`examples/always-on-agent`](examples/always-on-agent/README.md).
 
 ## Quick start
 
@@ -77,7 +76,7 @@ On the IQ-9075, after the setup steps in the developer guide:
 
 ```bash
 geniex list                                              # check what is already cached before pulling
-geniex infer LiquidAI/LFM2.5-2.6B-GGUF:Q4_0 --compute npu
+geniex infer LiquidAI/LFM3-1.7B-GGUF:Q4_0 --compute npu
 ```
 
 Then set up the decision layer: [`examples/system-one-decision`](examples/system-one-decision/README.md).
@@ -86,6 +85,6 @@ Then set up the decision layer: [`examples/system-one-decision`](examples/system
 
 This repository's code and docs are under the [MIT License](LICENSE). They do not include LiquidAI model weights or model code. The models are downloaded separately, by `geniex pull` and `fetch_d1.py`, and each one keeps its own licence:
 
-* `LiquidAI/d1-3B`, `LiquidAI/LFM2.5-2.6B-GGUF`, and `LiquidAI/LFM2-1.2B-Tool-GGUF` are under the **LFM Open License v1.0** (`lfm1.0`). It includes a commercial-use limit for organisations above US$10M annual revenue. Read each model card's LICENSE before you publish or commercialise a demo.
+* `LiquidAI/d1-2B` and `LiquidAI/LFM3-1.7B-GGUF` are under the **LFM Open License v1.0** (`lfm1.0`). It includes a commercial-use limit for organisations above US$10M annual revenue. Read each model card's LICENSE before you publish or commercialise a demo.
 * GenieX is distributed by Qualcomm under its own terms.
 
