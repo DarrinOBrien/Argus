@@ -3,12 +3,12 @@ name: iq9-offline-rehearsal
 description: Get a Dragonwing IQ-9075 app ready for the network-off demo and rehearse it. Covers a static audit for repo-ID loads, URLs, CDN assets, telemetry, and install-time fetches; staging models, wheels, and archives while the network is up; the network-off run; and evidence for the judges. Use before the network is cut, at T-1, when the user says "offline", "network cut", "airplane mode", "rehearsal", or "will this work without internet".
 compatibility: Audit script runs anywhere with Python 3. The rehearsal runs on the IQ-9075.
 metadata:
-  version: "0.1"
+  version: "0.2"
 ---
 
 # Offline rehearsal
 
-The event ends with the network removed. A project that only works online scores zero on the main constraint. The checklist and the common failures are in `docs/offline-readiness.md`. This skill is the procedure.
+The event ends with the network removed. A project that only works online scores zero on the main constraint. The checklist and the common failures are in `docs/offline-readiness.md`. This skill is the procedure. [Prior reference checks](../../README.md#developer-notes) used local/offline model loading while the network stayed connected; they are **not a physical network-off rehearsal**.
 
 ## 1. Static audit (run on the app's code)
 
@@ -25,38 +25,35 @@ python3 skills/iq9-offline-rehearsal/scripts/offline_audit.py apps/<name>
 | `telemetry` (warn) | Disable it or remove it |
 | `env` (info) | Add `export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1` to the launch script |
 
-It's a static check, so it misses dependencies that phone home on their own. Step 3 catches those.
+This is a heuristic static check, not proof of offline operation. Inspect runtime imports/dependencies and each warning. Finding an offline environment variable in text does not prove it is active; enforce `local_files_only=True` for Transformers and offline/telemetry settings before imports. Step 3 tests the whole app.
 
 ## 2. Stage everything while the network is up
 
-Check `df -h /` first. Pull only what is missing, and ask before pulling anything over 1 GB.
+Inspect `geniex list`, existing local model directories, and `df -h /` first. **Ask before every `geniex pull` (including local imports), `fetch_d1.py`, installation/system change, or deletion**, regardless of size. Reuse local weights with an approved import rather than downloading again; never re-pull cached models. Run long staging jobs in a separate terminal and verify exit status.
 
 - [ ] Run `geniex list` and confirm every model the app uses is cached. Run `geniex version` and confirm v0.10.0.
-- [ ] Confirm `~/models/d1-2B/REVISION` reads `10e7671d44e4…` (run `skills/iq9-preflight/scripts/preflight.sh`).
-- [ ] Download wheels for an offline reinstall: `~/.venvs/d1/bin/python -m pip download -r <app>/requirements.txt -d ~/wheels`, then test `pip install --no-index --find-links ~/wheels -r <app>/requirements.txt` in a scratch venv.
+- [ ] **If the app uses d1**, confirm `~/models/d1-2B/REVISION` reads `10e7671d44e4…`. Otherwise use `preflight.sh --profile generator --model <cached-name:precision>` (or `--profile board` without a generator). Reference defaults are not mandatory models.
+- [ ] If needed, with approval, download wheels for an offline reinstall: `~/.venvs/d1/bin/python -m pip download -r <app>/requirements.txt -d ~/wheels`, then test `pip install --no-index --find-links ~/wheels -r <app>/requirements.txt` in a scratch venv.
 - [ ] Keep the GenieX archive `geniex-cli-linux-arm64-v0.10.0.tar.gz` and `install.sh`.
 - [ ] Put sample and recorded data for the demo on the board (in case a sensor fails).
-- [ ] Clone this repo onto the board, so the docs and skills are there offline.
+- [ ] Stage this repo's docs and skills on the board. Back up files being replaced; do not use destructive sync to remove unrelated files.
+- [ ] Stage only the app's needed models/assets. External sensors are optional and not supplied; keep local sample/recorded inputs for any hardware-dependent demo.
 
 ## 3. Network-off run (the real test)
 
-The agent can't unplug the cable for the user, and over SSH it would cut its own connection. Have the user do this step on the board, or run a script that leaves the network down for a set time:
+**Get explicit permission before any network cut or reboot.** Over SSH this can cut your session. Prefer the user physically unplugging Ethernet and disabling Wi-Fi from the board's local console; inspect all active uplinks, including USB networking.
 
 1. The user unplugs Ethernet and turns off Wi-Fi. Check: `curl -sS -m 5 https://huggingface.co` must fail.
-2. Cold start: reboot, or `skills/iq9-geniex-lfm/scripts/serve.sh restart`, then start the app with its normal launch command.
+2. Cold start: with approval, stop the owned generator and run `skills/iq9-geniex-lfm/scripts/serve.sh run` in a separate terminal, then start the app normally. A reboot is optional and needs approval. Do not silently switch a foreground server to a detached restart.
 3. Run the core loop end to end for at least 10 minutes, including at least one alert or action.
 4. Collect evidence: the app's JSONL log, `skills/iq9-demo-prep/scripts/collect_metrics.sh`, and a screen or phone recording.
 5. Plug the network back in. Record anything that failed in the app's README, along with its fix.
 
-If the user wants a scripted cut on the board, give them this and have them run it locally, not over SSH:
-
-```bash
-IF=$(ip route | awk '/default/ {print $5; exit}'); sudo ip link set "$IF" down; sleep 900; sudo ip link set "$IF" up
-```
+Do not use a generic one-interface `ip link ... down` one-liner: it can leave another uplink active or fail to restore connectivity. A scripted cut requires an approved, board-specific interface list, a local console, and a tested restoration plan. A failed external `curl` is supporting evidence, not proof that every uplink is disconnected.
 
 ## 4. Recovery drill (T-1)
 
-- Keep the previous `LFM2.5-2.6B` stack cached as the rollback path until LFM3 passes rehearsal.
+- If an already-cached, previously tested stack is useful, keep it as an optional rollback. Do not require participants to download a legacy model or delete their chosen models.
 - A recorded decision log and a recorded video, in case the live demo fails.
 - Know where the log lives, and have a one-line command ready to show its last entries.
-- `serve.sh restart` memorised, for the zero-token state.
+- Know how to safely stop and relaunch the owned foreground server. The old zero-token failure was not reproduced in current reference checks; retain recovery for persistent failures, not as a guaranteed diagnosis.

@@ -1,75 +1,117 @@
-# Decision Layer — LiquidAI d1-2B
+# Decision Layer - LiquidAI d1-2B
 
-`LiquidAI/d1-2B` is a 1.92B-parameter **decision model** built on LFM3-VL-2B. You give it a state (text, JSON, images, or a mix) and named questions. It returns calibrated, typed answers in **one forward pass with zero output tokens**. It is not a chat model. ✅ (model card)
+`LiquidAI/d1-2B` is a 1.92B-parameter decision model built on LFM3-VL-2B. Give it a state and named questions; it returns probabilities, categories, or ratings in one forward pass with **zero generated output tokens**. It is not a chat model.
 
-This guide uses it as the **decision gate**: a cheap, calibrated "should I act, and how urgent is it?" check. The generative LFM model runs only when the decision says an explanation is worth the tokens.
-
-Markers: ✅ confirmed in the model card, GenieX docs, or our runs on the reference board · ⚠️ not yet verified.
+Use d1 as an optional gate for triage, routing, severity, or visual questions. For simple thresholds or fast loops, a deterministic rule may be more appropriate. The generator can run only when the app needs an explanation or a tool proposal.
 
 ## What it is
 
-| | |
+| Item | Value |
 |---|---|
-| Base model | LFM3-VL-2B ✅ |
-| Parameters | 1.92B ✅ |
-| Context | 128,000 tokens ✅ |
-| Output | Calibrated typed answers, zero output tokens ✅ |
-| Interface (native) | `model.system_one(state, questions, media=None)` and `system_one_batch(...)` ✅ |
-| License | LFM Open License v1.0 (tag `lfm1.0`). Read the LICENSE before any public demo. ✅ |
+| Base model | LFM3-VL-2B |
+| Parameters | 1.92B |
+| Context | 128,000 tokens |
+| Input | Text, JSON, images, or a mix |
+| Output | Typed answers, zero generated output tokens |
+| API | `model.system_one(state, questions, media=None)`, `model.system_one_batch(...)` |
+| License | LFM Open License v1.0; read the model's LICENSE |
+
+See the [model card](https://huggingface.co/LiquidAI/d1-2B) for model details and the [developer guide](developer-guide.md#21-two-models-two-jobs) for the reference architecture.
 
 ## Question types
 
-✅ (model card). Each answer is typed:
-
-| `type` | Asks | `criteria` | Answer |
+| `type` | Asks | `criteria` | Answer fields |
 |---|---|---|---|
-| `noul` | Yes or no | optional `{"true": …, "false": …}` | `{"type": "noul", "noul": P(yes)}` |
-| `choice` | One of named options | `{name: description}` | `choice`, `confidence`, `probabilities` |
-| `score` | Rating on 2–10 ordered levels | list of level descriptions, lowest first | `score` (median level index), `confidence`, `probabilities`, `legend` |
+| `noul` | Yes or no | Optional `{"true": "...", "false": "..."}` | `noul`: probability of yes |
+| `choice` | Choose one category | Map from category name to description | `choice`, `confidence`, `probabilities` |
+| `score` | Rate on ordered levels | 2-10 descriptions, lowest first | `score`, `confidence`, `probabilities`, `legend` |
 
-The full response is `{"answers": {name: answer}, "usage": {"input_tokens": n, "output_tokens": 0}}`. We confirmed this shape in the pinned `api.py`; the board run is pending. ⚠️
-
-## Why split the work
-
-- **Decisions are cheap and repeatable.** The same state gives the same probabilities.
-- **Thresholds are real numbers.** `p_alert` can be tuned on your data. A generated "yes" cannot.
-- **Explanations cost tokens only when needed.** Most loop iterations are a no-op.
-
-Use it for: triage, routing, guardrails on agent actions, yes/no checks on sensor readings, severity ranking, and visual checks. Not for free-form text. ✅ (model card)
-
-The architecture diagram, with the LFM generator downstream, is in the [developer guide §2.1](developer-guide.md#21-two-models-two-jobs).
+A score is the median level index, starting at zero. The response envelope contains `answers` and `usage`; `usage.output_tokens` is zero. Do not treat this as an LFM-generation failure.
 
 ## Running it on the IQ-9075
 
-The guide runs d1 through the model card's `system_one()` API, in-process with transformers, in fp32 on the CPU. d1-2B latency and memory are not yet measured on the IQ-9075. ⚠️
-
 ### Path A: transformers on the CPU
 
-- Requirements: `transformers>=5.19` (installed in a venv), torch and torchvision (CPU builds), pillow. `trust_remote_code=True` runs the repo's code, so review it first.
-- Weights: 3,836 MB safetensors at `~/models/d1-2B`, pinned to commit `10e7671d44e4`.
-- Measure fp32 and bf16, batching, image latency, peak RSS, and concurrency with the generator before choosing production settings. ⚠️
-- Calibrate on the app's own data; the previous d1-3B thermal result does not transfer.
-- The runnable example, with setup and sample output: [`examples/system-one-decision`](../examples/system-one-decision/README.md).
+The reference d1 integration uses a local Transformers snapshot in fp32 on the CPU. It does not send decision requests to the GenieX server.
 
-### No GenieX decision endpoint
+- Create a Python environment with Transformers 5.19+, torch, matching torchvision, and Pillow. Reuse the board's torch installation.
+- Stage the safetensors snapshot and its Python code at `~/models/d1-2B`, pinned to revision `10e7671d44e4`.
+- A GGUF file is not a substitute for this snapshot.
+- Review model code before allowing `trust_remote_code=True`. Ask before downloading a snapshot or changing its revision.
+- Load once with `local_files_only=True`, keep offline settings enabled, and reuse the model.
+- Keep the gate and the LFM sequential. Size the observation interval for the app's decision and generation work.
 
-GenieX decision serving changed after v0.8.0, but it is not yet verified with d1-2B on this board. This guide therefore keeps Path A. ⚠️
+Setup details: [System One example](../examples/system-one-decision/README.md).
+
+```python
+import json
+import os
+from pathlib import Path
+
+os.environ["HF_HUB_OFFLINE"] = "1"
+os.environ["TRANSFORMERS_OFFLINE"] = "1"
+os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"
+
+import torch
+from transformers import AutoModel
+
+model_dir = Path.home() / "models" / "d1-2B"
+model = AutoModel.from_pretrained(
+    str(model_dir), trust_remote_code=True, local_files_only=True, dtype=torch.float32
+).to("cpu").eval()
+
+questions = {
+    "alert": {"type": "noul", "instructions": "Does this state need a human alert now?"},
+    "category": {
+        "type": "choice",
+        "instructions": "Which category fits best?",
+        "criteria": {"thermal": "Heat problem", "normal": "No issue"},
+    },
+}
+state = {"soc_temp_c": 74, "change_c_per_min": 13, "trend": "rising"}
+with torch.inference_mode():
+    result = model.system_one(json.dumps(state), questions)
+answers = result["answers"]
+```
+
+For an image, pass a Pillow image through `media=[image]` alongside a state or `None`. Image assets can come from local files; a camera is not required. The runnable example also shows batch calls.
 
 ## Model files and disk
 
-| Item | Size | Path on the board | Used by |
-|---|---:|---|---|
-| `d1-2B` safetensors | 3.8 GB | `~/models/d1-2B` | Path A |
+| Item | Approximate size | Local path |
+|---|---:|---|
+| d1-2B safetensors weights | 3.84 GB | `~/models/d1-2B` |
 
-The snapshot includes the weights and the repo's Python code. The code runs when `trust_remote_code=True` is set. See [Safety and licensing](#safety-and-licensing).
+Stage the whole snapshot, not only the weights. Runtime memory is separate from disk size and depends on inputs, dtype, and batching.
+
+## Designing state and questions
+
+- Use descriptive keys and consistent schemas between calibration and production.
+- Include derived signals such as the change, direction, and time since the last event.
+- Ask only questions the app uses; each question adds input work.
+- Keep the state, questions, model revision, and probability precision consistent through calibration and policy.
 
 ## Calibrating thresholds
 
-- The card gives no thresholds. Start with `ALERT_THRESHOLD = 0.5` and tune on states you have labeled yourself. ⚠️
-- Log every decision with its probabilities. The log is both the tuning data and the offline proof.
+Do not deploy a default threshold of 0.5 or copy one from another task.
+
+1. Collect representative app states and probabilities.
+2. Label the desired decision with JSON `true` or `false`.
+3. Reserve separate held-out states, preferably from different events or time periods.
+4. Fit a threshold on the calibration set and evaluate it on the held-out set without refitting.
+
+From the repo root, for rows with stored probabilities:
+
+```bash
+python3 skills/iq9-d1-decision-gate/scripts/calibrate_threshold.py calibration.jsonl --eval held-out.jsonl
+```
+
+For rows that need scoring, run in the d1 environment with `--score`. For a scaffolded app, add `--questions-from apps/my-agent` to use that app's `questions.py`.
+
+Inspect precision, recall, false positives, and missed alerts against the app's requirements. If the model cannot separate the cases, revise the inputs/questions or use a rule instead. Log the selected threshold, decisions, timings, errors, and actions in the app's JSONL.
 
 ## Safety and licensing
 
-- `trust_remote_code=True` runs code from the model repo. We reviewed all shipped Python in revision `10e7671d44e4`: no subprocess or shell execution and no `eval`/`exec`/pickle. Transformers file helpers resolve the local snapshot when offline. Record the commit hash for any future change. ✅
-- d1 gates actions; it does not replace the allowlist. Only allowlisted actions run, whatever the probabilities say.
-- The LFM Open License v1.0 governs d1-2B. Read the commercial terms before publishing a demo. ✅ (model card)
+`trust_remote_code=True` executes Python from the snapshot. Review that code before loading it and keep the revision pin unchanged unless the board owner approves a new version.
+
+The model's probability does not authorize an action. Validate typed answers, apply policy in code, and execute only allowlisted actions. Read the model's LICENSE before publishing or commercializing an app.

@@ -3,7 +3,8 @@
 
 Copy this file into your app. It handles the board-specific traps:
   - every request is capped (max_completion_tokens on chat, max_tokens on completions)
-  - zero-token replies are retried once with a unique tag
+  - zero-token or unusable replies are retried once with a unique tag
+  - raw prompts are unique before the first request (opt out only for diagnostics)
   - sentence() uses a raw completion with LFM3's default reasoning block already closed
   - errors come back as data (ok=False, error=...), so a loop can log them and keep running
 
@@ -20,6 +21,7 @@ CLI:
 """
 
 import argparse
+import copy
 import json
 import sys
 import time
@@ -60,6 +62,9 @@ class LFM:
             return [m["id"] for m in json.load(r)["data"]]
 
     def _post(self, path, body):
+        cap = body.get("max_tokens" if path == "/v1/completions" else "max_completion_tokens")
+        if not isinstance(cap, int) or isinstance(cap, bool) or cap <= 0:
+            raise ValueError("max_tokens must be a positive integer")
         req = urllib.request.Request(self.server + path, data=json.dumps(body).encode(),
                                      headers={"Content-Type": "application/json"})
         t0 = time.perf_counter()
@@ -72,10 +77,12 @@ class LFM:
     def chat(self, messages, max_tokens=128, tools=None, model=None, retry_zero=True, **extra):
         """POST /v1/chat/completions. Returns a dict: ok, text, tool_calls, tokens, finish, ms, retried, error.
 
-        LFM3-1.7B may put reasoning in `text`. For a direct one-sentence answer use sentence().
+        Reasoning alone is not an answer. Try enable_think=False for direct chat answers,
+        or sentence() for the reference LFM3 template. Tool-call envelopes are checked here;
+        the app must still validate argument schemas, allowlists, and action policy.
         """
-        body = {"model": model or self.model, "messages": messages, "max_completion_tokens": max_tokens,
-                "compute": self.compute, "stream": False, **extra}
+        body = {**extra, "model": model or self.model, "messages": copy.deepcopy(messages),
+                "max_completion_tokens": max_tokens, "compute": self.compute, "stream": False}
         if tools:
             body["tools"] = tools
 
@@ -87,12 +94,15 @@ class LFM:
                     "ms": ms, "raw_message": m}
 
         return self._with_retry(lambda: parse(*self._post("/v1/chat/completions", body)),
-                                lambda: self._tag_messages(body), retry_zero)
+                                lambda: self._tag_messages(body), retry_zero, allow_tools=bool(tools))
 
-    def complete(self, prompt, max_tokens=80, model=None, retry_zero=True, **extra):
-        """POST /v1/completions with a raw prompt. Returns ok, text, tokens, finish, ms, retried, error."""
-        body = {"model": model or self.model, "prompt": prompt, "max_tokens": max_tokens,
-                "compute": self.compute, "stream": False, **extra}
+    def complete(self, prompt, max_tokens=80, model=None, retry_zero=True, unique=True, **extra):
+        """Raw completion. unique=False is for intentional repeated-prompt diagnostics only.
+
+        retry_zero is retained for compatibility; it now retries unusable output too.
+        """
+        body = {**extra, "model": model or self.model, "prompt": self._tag_prompt(prompt) if unique else prompt,
+                "max_tokens": max_tokens, "compute": self.compute, "stream": False}
 
         def parse(d, ms):
             c = d["choices"][0]
@@ -101,8 +111,7 @@ class LFM:
                     "ms": ms}
 
         def tag():
-            body["prompt"] = body["prompt"].replace("<|im_end|>\n<|im_start|>assistant",
-                                                    f" [{uuid.uuid4().hex[:8]}]<|im_end|>\n<|im_start|>assistant", 1)
+            body["prompt"] = self._tag_prompt(body["prompt"])
 
         return self._with_retry(lambda: parse(*self._post("/v1/completions", body)), tag, retry_zero)
 
@@ -117,31 +126,72 @@ class LFM:
     # ---- internals --------------------------------------------------------------------------------
 
     @staticmethod
+    def _tag_prompt(prompt):
+        """Tag the last user turn before the assistant prefix; also works on plain prompts."""
+        tag = f" [request:{uuid.uuid4().hex}]"
+        head, sep, tail = prompt.rpartition("<|im_start|>assistant")
+        if sep and "<|im_end|>" in head:
+            user, end, suffix = head.rpartition("<|im_end|>")
+            return user + tag + end + suffix + sep + tail
+        return f"Request {uuid.uuid4().hex}\n" + prompt
+
+    @staticmethod
     def _tag_messages(body):
         """Make the request unique for the zero-token retry: tag the last user message."""
         for m in reversed(body["messages"]):
             if m.get("role") == "user" and isinstance(m.get("content"), str):
-                m["content"] += f" [{uuid.uuid4().hex[:8]}]"
+                m["content"] += f" [request:{uuid.uuid4().hex}]"
                 return
+        for m in body["messages"]:
+            if m.get("role") == "system" and isinstance(m.get("content"), str):
+                m["content"] += f" [request:{uuid.uuid4().hex}]"
+                return
+        body["messages"].insert(0, {"role": "system", "content": f"Request {uuid.uuid4().hex}."})
 
     @staticmethod
-    def _with_retry(call, make_unique, retry_zero):
+    def _output_error(r, allow_tools=False):
+        tokens = r.get("tokens")
+        if not isinstance(tokens, int) or isinstance(tokens, bool) or tokens <= 0:
+            return "zero or missing completion tokens"
+        calls = r.get("tool_calls") or []
+        if calls:
+            if not allow_tools or not isinstance(calls, list):
+                return "unexpected or malformed tool_calls"
+            ids = set()
+            for call in calls:
+                if not isinstance(call, dict):
+                    return "malformed tool call"
+                fn, cid = call.get("function"), call.get("id")
+                if (call.get("type") != "function" or not isinstance(cid, str) or not cid
+                        or cid in ids or not isinstance(fn, dict)
+                        or not isinstance(fn.get("name"), str) or not fn["name"].strip()
+                        or not isinstance(fn.get("arguments"), str)):
+                    return "malformed tool-call envelope"
+                ids.add(cid)
+            return None  # Argument schemas and policy belong to the app, before execution.
+        if not isinstance(r.get("text"), str) or not r["text"].strip():
+            return "empty answer (reasoning alone is not usable output)"
+        return None
+
+    @staticmethod
+    def _with_retry(call, make_unique, retry_zero, allow_tools=False):
         out = {"ok": False, "text": "", "tool_calls": [], "tokens": 0, "finish": None, "ms": None,
                "retried": False, "error": None}
         try:
             r = call()
-            if retry_zero and r["tokens"] == 0 and not r["text"] and not r["tool_calls"]:
+            error = LFM._output_error(r, allow_tools)
+            if retry_zero and error:
                 out["retried"] = True
                 make_unique()
                 r = call()
+                error = LFM._output_error(r, allow_tools)
             out.update(r)
-            out["ok"] = bool(r["tokens"] > 0 or r["text"] or r["tool_calls"])
-            if not out["ok"]:
-                out["error"] = ("zero-token reply" + (" after retry" if out["retried"] else "")
-                                + ": vary the prompt, or restart geniex serve (docs/runtimes.md)")
+            out["ok"] = error is None
+            if error:
+                out["error"] = error + (" after retry" if out["retried"] else "")
         except urllib.error.HTTPError as e:
             out["error"] = f"HTTP {e.code}: {e.read()[:200].decode(errors='replace')}"
-        except (urllib.error.URLError, OSError, KeyError, ValueError) as e:
+        except (urllib.error.URLError, OSError, KeyError, ValueError, TypeError, IndexError, AttributeError) as e:
             out["error"] = f"{type(e).__name__}: {e}"[:200]
         return out
 

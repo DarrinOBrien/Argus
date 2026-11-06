@@ -11,8 +11,10 @@ set -euo pipefail
 SKILL_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 REPO_ROOT="$(cd "$SKILL_DIR/../.." && pwd)"
 DEST="${1:-}"
+case "$DEST" in --help|-h) echo "usage: scaffold.sh <app-dir> (creates a reference d1/LFM app; refuses existing paths)"; exit 0 ;; esac
 [ -n "$DEST" ] || { echo "usage: scaffold.sh <app-dir>" >&2; exit 64; }
-[ -e "$DEST" ] && { echo "refusing to overwrite $DEST" >&2; exit 1; }
+DEST="$(python3 -c 'import os,sys; print(os.path.abspath(sys.argv[1]))' "$DEST")"
+{ [ -e "$DEST" ] || [ -L "$DEST" ]; } && { echo "refusing to overwrite $DEST" >&2; exit 1; }
 
 SRC_AGENT="$REPO_ROOT/examples/always-on-agent/always_on_agent.py"
 SRC_QUESTIONS="$REPO_ROOT/examples/system-one-decision/system_one_example.py"
@@ -50,7 +52,9 @@ NAME="$(basename "$DEST")"
 cat > "$DEST/README.md" <<EOF
 # $NAME
 
-Always-on local agent on the Dragonwing IQ-9075, started from \`examples/always-on-agent\`.
+Reference always-on local agent on the Dragonwing IQ-9075, started from \`examples/always-on-agent\`.
+
+This scaffold uses d1-2B and LFM3-1.7B, not mandatory competition models. You may replace the gate with a rule or another decision design and choose another LFM3-family model after verifying its runtime/NPU and task behavior. External sensors are optional and not provided.
 
 ## Loop
 
@@ -66,17 +70,25 @@ observe → decide (d1-2B, CPU) → act (allowlist) → explain (LFM, NPU, only 
 | \`agent.py\` \`build_prompt()\` | include trend and direction, not just raw values |
 | \`--threshold\` | calibrated value (skills/iq9-d1-decision-gate) — not 0.5 |
 
-\`lfm_client.py\` is the repo's GenieX client (capped calls, zero-token retry, \`sentence()\`); switch \`explain()\` to it if you prefer.
+\`lfm_client.py\` provides capped calls, usable-output checks, unique initial raw prompts, and one retry. It does not execute tools or enforce their argument schemas/action policy. The copied \`agent.py\` currently uses its own explanation code; switch \`explain()\` to the client if preferred. Keep \`--stable-prompt\` for diagnostics only, never normal runs.
 
 ## Run
 
 \`\`\`bash
-geniex serve --compute npu   # other terminal
+# From the repo root, in a separate terminal:
+bash skills/iq9-geniex-lfm/scripts/serve.sh run
+# From this app's directory, in another terminal:
 ~/.venvs/d1/bin/python agent.py --sensor-mode simulated --iterations 4 --interval 1 --log test.jsonl   # smoke test
 ~/.venvs/d1/bin/python agent.py --threshold <calibrated> --log agent_log.jsonl
 \`\`\`
 
-## Measured
+## Offline and verification status
+
+Load d1 from the pinned local snapshot with offline settings; use only an already-cached generator. No installs, pulls, CDN assets, or telemetry at runtime. Ask before any model download/import or network cut. A passing local test is not a physical network-off rehearsal.
+
+## Measured (fill in after running this app)
+
+Record board/date, GenieX version, model/build and precision, sample count, and medians. Do not copy prior reference numbers as this app's measurements.
 
 | Metric | Value | How |
 |---|---|---|

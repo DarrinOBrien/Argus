@@ -9,6 +9,7 @@ Input: JSONL. Each line has a label and either a stored probability or a state t
 
     python calibrate_threshold.py labeled.jsonl                      # stored probabilities only, no torch
     ~/.venvs/d1/bin/python calibrate_threshold.py labeled.jsonl --score --model-dir ~/models/d1-2B
+    python calibrate_threshold.py calibration.jsonl --eval held-out.jsonl
     python calibrate_threshold.py labeled.jsonl --objective recall --min-precision 0.8
     python calibrate_threshold.py --self-test
 
@@ -33,15 +34,25 @@ def get_p(row):
 
 
 def score_missing(rows, model_dir, questions_from):
-    """Score rows that only have obs with d1 (fp32, CPU). About 4-5 s per state on the IQ-9075."""
-    import torch
-    from transformers import AutoModel
-    sys.path.insert(0, questions_from)
-    from system_one_example import SENSOR_QUESTIONS  # noqa: E402
+    """Score local states with d1 fp32 CPU; measure latency for this task/configuration."""
     todo = [r for r in rows if get_p(r) is None]
     if not todo:
         return
-    model = AutoModel.from_pretrained(os.path.expanduser(model_dir), trust_remote_code=True, dtype=torch.float32)
+    model_dir = os.path.abspath(os.path.expanduser(model_dir))
+    if not os.path.isdir(model_dir):
+        raise ValueError(f"local d1 snapshot directory not found: {model_dir}")
+    os.environ["HF_HUB_OFFLINE"] = "1"
+    os.environ["TRANSFORMERS_OFFLINE"] = "1"
+    os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"
+    import torch
+    from transformers import AutoModel
+    sys.path.insert(0, os.path.abspath(questions_from))
+    if os.path.isfile(os.path.join(questions_from, "questions.py")):
+        from questions import SENSOR_QUESTIONS  # noqa: E402 (scaffolded app's actual questions)
+    else:
+        from system_one_example import SENSOR_QUESTIONS  # noqa: E402 (reference questions)
+    model = AutoModel.from_pretrained(model_dir, trust_remote_code=True, local_files_only=True,
+                                      dtype=torch.float32)
     model = model.to("cpu").eval()
     with torch.inference_mode():
         for i, r in enumerate(todo, 1):
@@ -58,7 +69,7 @@ def confusion(pairs, t):
     prec = tp / (tp + fp) if tp + fp else 1.0
     rec = tp / (tp + fn) if tp + fn else 0.0
     f1 = 2 * prec * rec / (prec + rec) if prec + rec else 0.0
-    return {"threshold": round(t, 4), "tp": tp, "fp": fp, "fn": fn, "tn": tn,
+    return {"threshold": t, "tp": tp, "fp": fp, "fn": fn, "tn": tn,
             "precision": round(prec, 3), "recall": round(rec, 3), "f1": round(f1, 3)}
 
 
@@ -87,7 +98,7 @@ def choose(pairs, objective, min_precision):
 
 def report(pairs, objective, min_precision):
     n_pos = sum(y for _, y in pairs)
-    print(f"{len(pairs)} labeled states: {n_pos} alert, {len(pairs) - n_pos} no-alert")
+    print(f"Calibration (in-sample): {len(pairs)} labeled states: {n_pos} alert, {len(pairs) - n_pos} no-alert")
     a = auc(pairs)
     if a is not None:
         print(f"AUC {a:.3f}" + ("  <- d1 barely separates these classes; a threshold will not fix that" if a < 0.65 else ""))
@@ -123,11 +134,12 @@ def self_test():
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("labeled", nargs="?", help="JSONL with label plus p_alert (or obs, with --score)")
+    ap.add_argument("--eval", dest="evaluation", help="separate held-out JSONL; evaluate the fitted threshold without refitting")
     ap.add_argument("--score", action="store_true", help="score rows without p_alert using d1 (needs the d1 venv)")
     ap.add_argument("--model-dir", default="~/models/d1-2B")
     ap.add_argument("--questions-from", default=os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                                              "..", "..", "..", "examples", "system-one-decision"),
-                    help="directory with system_one_example.py (SENSOR_QUESTIONS)")
+                    help="directory with app questions.py or reference system_one_example.py (SENSOR_QUESTIONS)")
     ap.add_argument("--objective", choices=["f1", "recall"], default="f1",
                     help="f1: balance misses and false alarms. recall: catch the most alerts at --min-precision")
     ap.add_argument("--min-precision", type=float, default=0.8)
@@ -137,17 +149,49 @@ def main():
         return self_test()
     if not args.labeled:
         ap.error("labeled JSONL required")
-    rows = [json.loads(line) for line in open(args.labeled) if line.strip()]
-    rows = [r for r in rows if "label" in r]
-    if args.score:
-        score_missing(rows, args.model_dir, args.questions_from)
-    pairs = [(get_p(r), bool(r["label"])) for r in rows if get_p(r) is not None]
-    skipped = len(rows) - len(pairs)
-    if skipped:
-        print(f"skipped {skipped} rows with no p_alert (use --score to compute them)")
-    if not pairs:
-        sys.exit("no scored, labeled rows")
-    report(pairs, args.objective, args.min_precision)
+    def load_rows(path):
+        with open(path) as f:
+            rows = [json.loads(line) for line in f if line.strip()]
+        return [r for r in rows if "label" in r]
+
+    def load_pairs(path, rows):
+        pairs = []
+        for row in rows:
+            if not isinstance(row["label"], bool):
+                raise ValueError(f"{path}: labels must be JSON true/false")
+            p = get_p(row)
+            if p is None:
+                continue
+            if not 0 <= p <= 1:
+                raise ValueError(f"{path}: p_alert must be finite and between 0 and 1")
+            pairs.append((p, row["label"]))
+        if len(rows) != len(pairs):
+            print(f"{path}: skipped {len(rows) - len(pairs)} rows without probabilities (use --score)")
+        if not pairs:
+            raise ValueError(f"{path}: no scored, labeled rows")
+        return pairs
+
+    if not 0 <= args.min_precision <= 1:
+        ap.error("--min-precision must be between 0 and 1")
+    if args.evaluation and os.path.realpath(args.evaluation) == os.path.realpath(args.labeled):
+        ap.error("--eval must be a separate held-out file, not the calibration file")
+    try:
+        rows = load_rows(args.labeled)
+        eval_rows = load_rows(args.evaluation) if args.evaluation else []
+        if args.score:
+            score_missing(rows + eval_rows, args.model_dir, args.questions_from)  # One model load for both sets.
+        pairs = load_pairs(args.labeled, rows)
+        evaluation = load_pairs(args.evaluation, eval_rows) if args.evaluation else None
+    except (OSError, ValueError, KeyError, TypeError) as e:
+        ap.error(str(e))
+    best = report(pairs, args.objective, args.min_precision)
+    if evaluation is None:
+        print("warning: no held-out evaluation; this fitted threshold is not a production recommendation")
+    elif best is not None:
+        print(f"\nHeld-out evaluation ({len(evaluation)} states; threshold not refitted):")
+        print(json.dumps(confusion(evaluation, best["threshold"])))
+        a = auc(evaluation)
+        print(f"Held-out AUC: {a:.3f}" if a is not None else "Held-out AUC: unavailable (one class)")
 
 
 if __name__ == "__main__":

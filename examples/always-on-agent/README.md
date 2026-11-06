@@ -10,7 +10,9 @@ observe ─→ decide (d1-2B, CPU) ─→ act (allowlist) ─→ explain (LFM3-1
    └──────────────────────────────────── wait --interval seconds ─────────────────────────────────┘
 ```
 
-The steps run in sequence. The gate and the generator never run at the same time. Running them together slows the gate about 1.9× (measured; see [`docs/developer-guide.md` §8](../../docs/developer-guide.md#8-building-an-always-on-agent)).
+This is a reference d1/LFM3-1.7B design, not a requirement to use those models. d1 is optional and other LFM3-family models are welcome after verifying runtime/NPU support and task behavior. External sensors are optional and not supplied.
+
+The steps run in sequence. [Dated current-stack contention checks](../../README.md#developer-notes) support keeping d1 and the generator sequential; re-measure before changing the policy. Those checks do not verify the revised helper code or this app's current performance.
 
 ## Prerequisites
 
@@ -18,7 +20,7 @@ The steps run in sequence. The gate and the generator never run at the same time
 - A GenieX server on `127.0.0.1:18181` with `LiquidAI/LFM3-1.7B-GGUF:Q4_0` in the cache:
 
   ```bash
-  geniex serve --compute npu        # keep this running in another terminal
+  bash skills/iq9-geniex-lfm/scripts/serve.sh run  # repo root, separate terminal
   ```
 
 ## Run
@@ -34,9 +36,9 @@ cd examples/always-on-agent
 | `--iterations` | 0 (forever) | number of loop iterations; 0 runs until Ctrl-C |
 | `--interval` | 5 | seconds to wait between iterations |
 | `--threshold` | 0.5 | `p_alert` that triggers `log_alert`. An example value; tune it on labeled states |
-| `--max-explain-tokens` | 80 | cap on the explanation. Replies take about 20–50 tokens |
+| `--max-explain-tokens` | 80 | cap on the explanation; tune and verify usable answers for your task |
 | `--sensor-mode` | `board` | `board` reads the SoC thermal zones (default). `simulated` makes random states and `fixed` repeats one hot state. Both are for tests |
-| `--stable-prompt` | off | leave the timestamp out of explanation prompts (for testing the zero-token retry) |
+| `--stable-prompt` | off | diagnostics only: intentionally repeat initial raw prompts without request tags |
 | `--log` | `agent_log.jsonl` | JSONL log, appended to |
 | `--model-dir`, `--server`, `--llm` | `~/models/d1-2B`, `http://127.0.0.1:18181`, `LiquidAI/LFM3-1.7B-GGUF:Q4_0` | where the models are |
 
@@ -49,7 +51,7 @@ Ctrl-C finishes the current iteration, writes its log line, and prints a summary
 | Observe | `read_sensors()`, `BoardTelemetry` | Reads the board's thermal zones from `/sys/class/thermal` (about 60 zones). The observation is the hottest zone now, the same value about one minute ago, and the 1-minute CPU load. No extra hardware. |
 | Decide | `decide()` | d1-2B through `system_one()`, the same three questions as the sensor example. Returns `p_alert`, `category`, `severity`, and `gate_ms`. |
 | Act | `choose_action()`, `run_action()` | Policy picks `log_alert` (when `p_alert >= threshold`) or `no_op`. `run_action()` runs an action only if it is in `ALLOWED_ACTIONS`, otherwise it returns `refused:<name>` and logs it. |
-| Explain | `explain()`, `complete()` | Only for `log_alert`. Retries once on a zero-token reply (see below). Errors are logged, and the loop keeps running. |
+| Explain | `explain()`, `complete()` | Only for `log_alert`. Retries once on zero-token or empty-answer output (see below). Errors are logged, and the loop keeps running. |
 | Log | `main()` | One JSON object per iteration. |
 
 ### Allowlist
@@ -58,7 +60,7 @@ Ctrl-C finishes the current iteration, writes its log line, and prints a summary
 
 ### Explanations: why a raw completion
 
-LFM3-1.7B reasons by default. The agent sends a raw completion with the reasoning block already closed; verify this shortcut on the board:
+LFM3-1.7B reasons by default. The agent sends a raw completion with the reasoning block already closed. [Dated reference probes](../../README.md#developer-notes) verified direct answers with unique prompts, but this does not guarantee correctness or transfer to other models:
 
 ```
 <|im_start|>system ... <|im_end|>
@@ -72,9 +74,13 @@ LFM3-1.7B reasons by default. The agent sends a raw completion with the reasonin
 
 The template uses LFM3's ChatML tokens. Record its output and latency on the board before the demo.
 
-### Zero-token replies
+### Unusable replies and repeated prompts
 
-On GenieX v0.8.0, repeated identical requests sometimes return HTTP 200 with no tokens (see [`docs/runtimes.md`](../../docs/runtimes.md#known-gap-zero-token-responses-on-v080)). The explanation prompt includes a timestamp, so each prompt is unique. If a reply still has no tokens, the agent retries once with a random tag. A reply that is still empty is logged with `ok: false`, and the loop continues. The agent does not restart the server.
+The v0.8.0 zero-token failure is historical; it was not reproduced in current reference checks, not declared fixed. Current checks did find empty/reasoning-only output with positive usage and continuing commentary on identical raw prompts.
+
+Normal explanation prompts get a unique event tag **before the first call**. Zero tokens or empty text trigger one tagged retry. Persistent failure gets `ok: false` and an error; the loop continues without automatically restarting the server. `zero_token_first_try` means actual zero usage; `empty_response_first_try` separately records an empty answer. `--stable-prompt` is diagnostics only.
+
+The gate loads the pinned local snapshot with `local_files_only=True` and offline/telemetry settings; no model downloads or installs occur at runtime.
 
 ## Log format
 
@@ -105,13 +111,15 @@ These v0.8.0 results are a regression baseline, not LFM3/d1-2B measurements. Re-
 
 Timing: the gate takes about 4.1 s per iteration. An iteration with an explanation takes about 5–6 s warm. The loop in run C had a median gate time of 4.1 s.
 
-## Limits
+## Limits and interpretation
 
-- **The gate does not track board temperature.** On the board's own readings (run D and table E above), the d1 gate alerted on most states and did not follow temperature. Its calibration does not carry over to these readings. Do not use the default threshold on board data. Calibrate on labeled board data first, or use a rule for the thermal alarm.
+The temperature failures and direction mistakes below are **historical d1-3B/LFM2.5 observations**, not measured d1-2B/LFM3 accuracy claims. Current synthetic d1-2B checks still support calibrating on real app labels and evaluating held-out states; do not deploy the synthetic fitted threshold.
+
+- **The historical gate did not track board temperature.** On the board's own readings (run D and table E above), the d1 gate alerted on most states and did not follow temperature. Its calibration does not carry over to these readings. Do not use the default threshold on board data. Calibrate on labeled board data first, or use a rule for the thermal alarm.
 - **Explanations can state the wrong direction.** In run D, the LFM described a falling temperature as having risen. The prompt gives the values but not the direction. Pass the change and its sign explicitly.
 - **The threshold is untuned.** `--threshold 0.5` is an example value. The gate fired on 3 of 8 simulated states, and a 39 °C reading got `p_alert` 0.51 in run A.
 - **Explanations describe the gate's decision. They don't check it.** If the gate is wrong, the explanation repeats the error. Run A's explanation called 39 °C "high".
-- **The explanation includes the timestamp.** The model echoes "at 2026-10-12T20:04:10 UTC". Remove the `Time:` line from `build_prompt()` if that isn't wanted. Removing it reintroduces the zero-token risk, so keep a unique tag instead.
+- **Unique prompts are still needed.** The revised prompt uses request tags instead of a `Time:` line. Tags do not guarantee answer correctness; do not remove uniqueness for normal runs.
 - **Restart is not automatic.** If a reply is still empty after the retry, restart `geniex serve` by hand.
 - **Not tested with the network off.** Use [`docs/offline-readiness.md`](../../docs/offline-readiness.md) for the rehearsal.
 
@@ -120,7 +128,7 @@ Timing: the gate takes about 4.1 s per iteration. An iteration with an explanati
 | Symptom | Fix |
 |---|---|
 | `no GenieX server at ...` | Start `geniex serve --compute npu` and check `geniex list` for the model. |
-| `d1 snapshot not found` | Run `fetch_d1.py` as described in [`examples/system-one-decision`](../system-one-decision/README.md). |
-| `ok: false` in the log, with `zero_token_first_try: true` | Both the first try and the retry returned no tokens. Restart `geniex serve`. |
+| `d1 snapshot not found` | Inspect existing local snapshots and ask before `fetch_d1.py`; see [`examples/system-one-decision`](../system-one-decision/README.md). |
+| `ok: false` in the log | Read the error and first-try flags. They do not establish what happened on the retry. Safely relaunch only the owned server if persistent failure warrants it. |
 | `error` set on an explanation | Read the message. Timeouts and HTTP errors are logged and the loop continues. |
-| First alert takes about 5 s longer | The model loads on the first request, and idle unloading brings that back after 300 s (see [`docs/runtimes.md`](../../docs/runtimes.md#server-lifecycle-model-loading-and-idle-unloading)). |
+| First alert or post-idle request is slower | Model loading/idle unloading may contribute. Default keepalive is 300 s; measure the selected model's reload penalty rather than transferring the legacy five-second figure. |

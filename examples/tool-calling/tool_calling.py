@@ -9,8 +9,8 @@ The model picks a tool and fills its arguments. Code does everything else:
   5. log        every step is one JSON line; the summary lists only actions that actually ran
 
 Standard library only. Needs `geniex serve` on --server with the model cached:
-    geniex pull LiquidAI/LFM3-1.7B-GGUF:Q4_0
-    geniex serve --compute npu
+    geniex list  # reference model; inspect existing local weights and ask before pulls/imports
+    bash skills/iq9-geniex-lfm/scripts/serve.sh run  # repo root; foreground in a separate pane
 
     python3 tool_calling.py
     python3 tool_calling.py --prompt "Is the board too hot? If so, log a note for the operator."
@@ -163,7 +163,7 @@ def run_tool(name, raw_args, state, notes):
         return {"error": f"unknown tool '{name}'. Allowed: {sorted(TOOLS)}"}, False
     try:
         args = json.loads(raw_args) if raw_args else {}
-    except json.JSONDecodeError as e:
+    except (json.JSONDecodeError, TypeError) as e:
         return {"error": f"arguments are not valid JSON: {e}"}, False
     errors = validate(args, TOOLS[name]["parameters"])
     if errors:
@@ -172,6 +172,7 @@ def run_tool(name, raw_args, state, notes):
     if refusal:
         return {"error": refusal}, False
     if name == "read_thermal":
+        state.pop("last_temp_c", None)  # A failed refresh must not authorize a write from stale data.
         result = read_thermal()
         if "temp_c" in result:
             state["last_temp_c"] = result["temp_c"]
@@ -201,10 +202,41 @@ def chat(server, model, messages, max_tokens):
     return d, round((time.perf_counter() - t0) * 1000, 1)
 
 
+def response_error(d):
+    """Check usable text or tool envelopes, including positive-token reasoning-only failures.
+
+    Argument JSON/schema and action policy are checked by run_tool(), not trusted here.
+    """
+    try:
+        tokens = d.get("usage", {}).get("completion_tokens")
+        if not isinstance(tokens, int) or isinstance(tokens, bool) or tokens <= 0:
+            return "zero or missing completion tokens"
+        m = d["choices"][0]["message"]
+        if m.get("content") is not None and not isinstance(m["content"], str):
+            return "malformed answer content"
+        calls = m.get("tool_calls") or []
+        if calls:
+            if not isinstance(calls, list):
+                return "malformed tool_calls"
+            ids = set()
+            for call in calls:
+                fn, cid = call.get("function"), call.get("id")
+                if (call.get("type") != "function" or not isinstance(cid, str) or not cid
+                        or cid in ids or not isinstance(fn, dict)
+                        or not isinstance(fn.get("name"), str) or not fn["name"].strip()
+                        or not isinstance(fn.get("arguments"), str)):
+                    return "malformed tool-call envelope"
+                ids.add(cid)
+            return None
+        content = m.get("content")
+        return None if isinstance(content, str) and content.strip() else "empty answer (reasoning alone)"
+    except (AttributeError, KeyError, IndexError, TypeError):
+        return "malformed chat response"
+
+
 def is_empty(d):
-    """Zero-token reply (GenieX v0.8.0 after repeated identical requests)."""
-    m = d["choices"][0]["message"]
-    return d.get("usage", {}).get("completion_tokens", 0) == 0 and not m.get("tool_calls") and not m.get("content")
+    """Compatibility helper: true for any unusable response, not only zero-token output."""
+    return response_error(d) is not None
 
 
 def server_ready(server):
@@ -232,22 +264,32 @@ def run(args):
         log.write(json.dumps({"t": now_iso(), **entry}) + "\n")
         log.flush()
 
-    # The request tag keeps prompts unique, which avoids the v0.8.0 zero-token state (see docs/runtimes.md).
+    # Fresh request tags are defensive; they do not guarantee answer or tool-call correctness.
     messages = [{"role": "system", "content": f"{SYSTEM_PROMPT} Request {uuid.uuid4().hex[:6]}."},
                 {"role": "user", "content": args.prompt}]
     print(f"user: {args.prompt}")
     final = None
     for step in range(args.max_steps):
-        d, ms = chat(args.server, args.model, messages, args.max_tokens)
         retried = False
-        if is_empty(d):
-            retried = True
-            messages[0]["content"] = f"{SYSTEM_PROMPT} Request {uuid.uuid4().hex[:6]}."
+        try:
             d, ms = chat(args.server, args.model, messages, args.max_tokens)
+            error = response_error(d)
+            if error:
+                retried = True
+                messages[0]["content"] = f"{SYSTEM_PROMPT} Request {uuid.uuid4().hex}."
+                d, ms = chat(args.server, args.model, messages, args.max_tokens)
+                error = response_error(d)
+            if error:
+                write({"step": step, "ms": ms, "retried": retried, "error": error,
+                       "raw_response": d})
+                break  # Never execute any call from an unusable/malformed turn.
+        except (urllib.error.URLError, OSError, KeyError, ValueError, TypeError, IndexError) as e:
+            write({"step": step, "retried": retried, "error": f"{type(e).__name__}: {e}"[:200]})
+            break
         choice = d["choices"][0]
         msg = choice["message"]
         calls = msg.get("tool_calls") or []
-        write({"step": step, "ms": ms, "retried": retried, "finish": choice["finish_reason"],
+        write({"step": step, "ms": ms, "retried": retried, "finish": choice.get("finish_reason"),
                "tokens": d.get("usage", {}).get("completion_tokens"), "content": msg.get("content") or None,
                "tool_calls": [{"name": c["function"]["name"], "arguments": c["function"]["arguments"]} for c in calls]})
         if not calls:
@@ -256,7 +298,10 @@ def run(args):
         messages.append({"role": "assistant", "content": msg.get("content") or "", "tool_calls": calls})
         for c in calls:
             name, raw = c["function"]["name"], c["function"]["arguments"]
-            result, ok = run_tool(name, raw, state, notes)
+            try:
+                result, ok = run_tool(name, raw, state, notes)
+            except (OSError, ValueError) as e:
+                result, ok = {"error": f"{type(e).__name__}: {e}"[:200]}, False
             print(f"  step {step}: {name}({raw}) -> {'ran' if ok else 'refused'} {json.dumps(result)}  [{ms:.0f} ms]")
             write({"step": step, "tool": name, "arguments": raw, "executed": ok, "result": result})
             if ok:
@@ -291,6 +336,14 @@ def self_test():
     s["last_temp_c"] = 75.0
     assert run_tool("log_note", ok_args, s, notes) == ({"logged": True, "path": os.path.basename(os.devnull)}, True)
     assert run_tool("read_system", "", s, notes)[1] is True
+    reason_only = {"usage": {"completion_tokens": 32},
+                   "choices": [{"message": {"content": "", "reasoning_content": "thinking"}}]}
+    assert is_empty(reason_only)
+    assert is_empty({"choices": []})
+    tool_reply = {"usage": {"completion_tokens": 12}, "choices": [{"message": {"tool_calls": [
+        {"id": "call_1", "type": "function", "function": {"name": "read_system", "arguments": "{}"}}
+    ]}}]}
+    assert not is_empty(tool_reply)
     print("self-test passed")
 
 

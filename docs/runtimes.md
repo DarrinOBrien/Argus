@@ -1,121 +1,133 @@
-# Runtimes and Tooling — GenieX on the IQ-9075
+# Runtimes and Tooling - GenieX on the IQ-9075
 
-GenieX is Qualcomm's local inference stack. This guide uses it for LFM generation. The decision route is Path A (transformers, CPU), which does not use GenieX. Markers: ✅ confirmed in GenieX docs or our runs on the reference board · ⚠️ unverified · ⚠️ **behaviour differs from the docs** where noted.
+The reference generator uses **GenieX CLI v0.10.0** with a cached LFM GGUF. The optional d1-2B gate uses **Transformers on the CPU (Path A)** and does not call the GenieX server.
 
-## Versions used in this guide
-
-| Install | Version | Where | Status |
-|---|---|---|---|
-| **Migration target** | GenieX CLI v0.10.0 | `~/.local/bin/geniex` → `~/.local/share/geniex` | ⚠️ required for the LFM3 migration; not yet exercised on the reference IQ-9075 |
-| Legacy measured | GenieX CLI v0.8.0, QAIRT 2.45, llama.cpp `9425611` | `/usr/local/bin/geniex` → `~/.local/bin/geniex` → `~/.local/share/geniex` | 🧪 source of the LFM2.5 numbers below |
-
-GenieX added decision endpoints after v0.8.0, but this repo keeps d1-2B on Transformers Path A until decision serving is verified on the board.
+Use `geniex version` and `geniex --help` to inspect the installed runtime. Do not reinstall or change versions unnecessarily, especially between rehearsal and the demo.
 
 ## Runtimes
 
-| | `llama_cpp` | `qairt` (Qualcomm AI Engine Direct) |
-|---|---|---|
-| Model format | GGUF from Hugging Face | Qualcomm AI Hub bundles |
-| Compute units | NPU / GPU / CPU / hybrid | NPU only |
-| Precision | You choose (`Q4_0`, `Q8_0`, `F16`, …) | Fixed in the bundle |
-| **This event** | **LFM GGUFs** ✅ | Not used |
+| Runtime | Model format | Compute routes | Use in this repository |
+|---|---|---|---|
+| `llama_cpp` through GenieX | GGUF and associated model assets | NPU, GPU, CPU, hybrid, depending on model support | Reference LFM generator |
+| `qairt` | Qualcomm AI Hub bundles | NPU | Alternative deployment format; conversion is outside this guide |
+| Transformers | Local safetensors snapshot and model code | CPU for d1 Path A | Optional decision gate |
+
+## Model format and precision
+
+Choose the model, input modality, file format, precision, and compute route together. A familiar model name or smaller weight file does not establish runtime or NPU compatibility. Check the chosen artifact against the installed runtime's documentation and test it on the IQ-9075; the reference configuration's results do not verify other checkpoints or precisions.
+
+- The reference LFM3-1.7B **QAD-Q4_0** build is registered as `LiquidAI/LFM3-1.7B-GGUF:Q4_0` in GenieX. Other Q4 formats are not interchangeable with this build.
+- Match weights, tokenizer, prompt template, and any projector or other modality assets to the selected model. Vision and audio need their own supported request handling, not just a different model ID.
+- The helper's raw `sentence()` template targets the reference LFM3 format. Re-test templates, reasoning controls, usable answers, and tool-call behavior when changing models.
+- Record the exact artifact, revision, precision, and runtime in the app's configuration so it can be reproduced offline.
+
+The optional d1 Path A uses a pinned local Transformers snapshot, not a GGUF. See [Decision layer](decision-models.md) for loading and calibration, and [Offline readiness](offline-readiness.md#disk-first) for asset staging and disk budgeting.
 
 ## CLI
 
 | Command | Purpose | Notes |
 |---|---|---|
-| `geniex --help`, `geniex version` | Check the install ✅ | |
-| `geniex config get chipset` | Board name (`Dragonwing IQ-9075 EVK`) ✅ | |
-| `geniex pull <repo>[:<precision>] [--model-type llm\|vlm]` | Download into the cache ✅ | **⚠️ On v0.4.0, `pull LiquidAI/LFM2.5-2.6B-GGUF:Q4_0` also downloaded `LFM2.5-2.6B-QAD-Q4_0.gguf` (1.6 GB) and a `qad/tokenizer.json`, and rewrote `geniex.json`.** See [pitfalls](#pitfalls). |
-| `geniex list` | Cached models, sizes, precisions ✅ | Size is the sum of every file, including extras |
-| `geniex model set-type <model> llm\|vlm` | Set the modality ✅ | Use `vlm` for LFM vision models ✅ |
-| `geniex remove <model>[:<precision>]` | Remove a model or one precision ✅ | Without `:<precision>` it removes the whole model |
-| `geniex clean` | Remove all cached models ✅ | Destructive |
-| `geniex infer <model> [--compute …] [--nctx N] [--think]` | Interactive chat ✅ | |
-| `geniex serve [--compute …] [--nctx N] [--log info]` | OpenAI-compatible server on `127.0.0.1:18181` ✅ | Does not download models |
+| `geniex --help`, `geniex version` | Inspect CLI options and version | Use the installed version's help for flags |
+| `geniex config get chipset` | Inspect board configuration | Reference target: IQ-9075 |
+| `geniex list` | List registered cached models | Check before proposing a download |
+| `geniex pull <name>:<precision>` | Download and register model assets | Setup only; obtain approval first |
+| `geniex pull <name>:<precision> --local-path <directory>` | Import existing local assets into the cache | Copies files; obtain approval and check disk space |
+| `geniex model set-type <model> llm\|vlm` | Set model modality | Use the matching assets and client for vision models |
+| `geniex infer <model> --compute npu` | Interactive exploration | Use capped HTTP requests for scripted calls |
+| `geniex serve --compute npu --keepalive 1800 --log info` | Run an OpenAI-compatible server | Reference address: `127.0.0.1:18181`; no model downloads |
+| `geniex remove <model>[:<precision>]` | Delete cached assets | Destructive; ask the board owner first |
+| `geniex clean` | Delete all cached models | Destructive; not a routine troubleshooting step |
 
-## Server endpoints (v0.4.0 unless noted)
+## Local server
 
-| Endpoint | Status | Notes |
-|---|---|---|
-| `POST /v1/chat/completions` | ✅ works | See the request-field table below |
-| `POST /v1/completions` | ✅ works | `logprobs` returns `400 logprobs is not supported` |
-| `POST /v1/systemone` | ⚠️ not used | Absent from v0.4.0/v0.8.0; newer decision serving is not yet verified here |
-| `GET /v1/models` | ✅ | Lists cached models with `:<precision>` suffixes |
+Run a foreground server in a separate terminal. From the repo root:
 
-### Chat request fields (what actually takes effect)
+```bash
+bash skills/iq9-geniex-lfm/scripts/serve.sh run
+```
 
-Legacy results tested on `LiquidAI/LFM2.5-2.6B-GGUF:Q4_0` on v0.4.0/v0.8.0. Re-test these fields on LFM3 with v0.10.0:
+Keep the server visible and use another terminal for requests and diagnostics. Do not bind to a non-loopback address without approval.
 
-| Field | Result | Use it? |
-|---|---|---|
-| `max_completion_tokens` | ✅ **honoured**: `16` in → 16 out, `finish_reason: "length"` | **Yes.** Use this to cap length. |
-| `max_tokens` | ✅ **honoured on v0.8.0**: `16` in, 16 out, `finish_reason: "length"`, streamed and non-streamed. It was ignored on v0.4.0 (479 returned). If both fields are set, `max_completion_tokens` wins (measured). | Yes, but use `max_completion_tokens` in this repo's examples. |
-| `stream` | ✅ SSE deltas | Yes. Count tokens with `usage` on non-stream calls. |
-| `compute` (per request) | ✅ `npu`, `hybrid`, `cpu` | Yes |
-| `power_mode` (per request) | ✅ `burst` gave 14.4 tok/s against 11.7 at the default, one test | Use `burst` for benchmarks and demos |
-| `enable_think` | ⚠️ no effect on LFM2.5-2.6B output. `chat_template_kwargs: {"enable_thinking": false}` also had no effect (measured) | Not for this model |
-| `reasoning_format: "deepseek"` | ⚠️ no effect: `reasoning_content` stayed empty | Not for this model |
-| `stop` | ⚠️ `["\n\n"]` did not stop generation in one test (932 tokens) | Do not rely on it |
-| `logprobs` on chat | ⚠️ accepted, but `logprobs.content` is `null` | No token probabilities via chat |
+The helper defaults to NPU compute, a 1800-second keepalive, and `./geniex-serve.log`. In another terminal, `serve.sh status` reports the listener, model IDs, and device-log excerpt. Stop only a server you can safely interrupt.
 
-**Output length matters for latency.** LFM2.5-2.6B writes its reasoning into the visible answer ("The user wants…"), with or without a system prompt asking for a single sentence. A one-sentence alert took 200–1,400 tokens without a cap. Cap with `max_completion_tokens`, and plan the demo's latency around that. ⚠️ Untested: other LFM variants may be more concise. Chat replies carry the reasoning text, so cutting them short does not give an answer. A raw `/v1/completions` prompt with `<think>\n\n</think>\n\n` already closed after the assistant tag returns the sentence directly: about 30 tokens and about 1.5 s on the IQ-9075 (measured; see [`examples/always-on-agent`](../examples/always-on-agent/README.md#explanations-why-a-raw-completion)).
+## Server endpoints
 
-## Python SDK
+| Endpoint | Purpose |
+|---|---|
+| `GET /v1/models` | List registered model IDs with precision suffixes |
+| `POST /v1/chat/completions` | Chat messages and native `tools` requests |
+| `POST /v1/completions` | Raw text prompts using the selected model's template |
 
-Not used in this event. The verified route is the HTTP server. We have not run the SDK's Python API here, so check any vendor snippet before using it. ⚠️
+The reference d1 integration uses `model.system_one()` locally, not `/v1/systemone` or `/v1/decisions`. See [Decision layer](decision-models.md).
 
-## Benchmarking
+### Request fields
 
-`geniex-bench` measures TTFT, prefill, and decode for a GGUF on `llama_cpp`. ✅ (its `--help`)
+| Field | Use |
+|---|---|
+| `model` | Already-registered cache ID, such as `LiquidAI/LFM3-1.7B-GGUF:Q4_0` |
+| `messages` | Chat message list for `/v1/chat/completions` |
+| `prompt` | Model-specific raw prompt for `/v1/completions` |
+| `max_completion_tokens` | Required output budget for chat calls |
+| `max_tokens` | Required output budget for raw completions |
+| `compute` | `npu` for the reference generator |
+| `stream` | `false` for a single JSON response, `true` for SSE |
+| `stream_options.include_usage` | Request token usage in the streamed response |
+| `enable_think` | Try `false` for direct LFM3-1.7B chat answers |
+| `tools` | OpenAI-style function schemas for tool requests |
 
-- **Match the bench to the runtime.** Use the v0.10.0 bench for the migration. The historical v0.4.0/v0.8.0 results below apply only to LFM2.5. ✅
-- Put its libraries on the path: `export LD_LIBRARY_PATH=$D/lib:$D/lib/llama_cpp:$D/lib/qairt`. Without it, the binary fails with `libgeniex.so: not found`. ✅ (observed)
-- Defaults: 5 measured runs, 512-token prefill, 128 generated tokens. The summary line is the median run, per the bench docs. ✅ (bench docs). We did not see per-run values.
-- `--output-json-dir` only works in matrix mode (`--matrix-file`). ✅ (observed)
+Set the endpoint's token-budget field explicitly. Stop sequences or a prompt asking for brevity are not substitutes for a cap.
 
-Download: `https://qaihub-public-assets.s3.us-west-2.amazonaws.com/qai-hub-geniex/geniex-bench-linux-arm64-v<VERSION>.tar.gz`. Use the version matching the active runtime.
+LFM3-1.7B reasons by default. For a direct answer, try chat with `enable_think: false` or the helper's raw `sentence()` template with its reasoning block already closed. Always inspect the returned answer; neither method guarantees useful content. Other models may require different templates or reasoning controls.
 
-## Known gap: server CPU decode
+<a id="known-gap-zero-token-responses-on-v080"></a>
 
-The server's CPU path decodes at about **2.8 tok/s**, while the bench's CPU decode is **27.1 tok/s** on the same model. The server log shows `n_threads=6, strict_cpu=true`. The bench uses `n_threads=8, strict_cpu=false`. We did not find a way to set threads on the server, so the cause is not fully confirmed. ⚠️ Use the NPU or hybrid routes through the server, or benchmark CPU with `geniex-bench`.
+## Handling unusable output
 
-## Pitfalls
+- Reject zero or missing completion tokens for LFM generation.
+- For text requests, reject empty `content`, including reasoning-only output with positive usage.
+- For tools, require valid call envelopes, parse argument JSON, and validate schemas, allowlists, and policy before execution. A valid tool call need not include accompanying text.
+- Return errors as data and log them. Retry unusable output once with a fresh request tag.
+- Make raw prompts unique before the first request, not only on retry. Include an event ID or use `lfm_client.py`.
+- For persistent server failures, inspect the error and current log before safely relaunching the owned server. Do not automatically interrupt shared jobs.
 
-**Re-pulling a model can download extras.** On v0.4.0, `geniex pull LiquidAI/LFM2.5-2.6B-GGUF:Q4_0` on a board that already had the model downloaded `LFM2.5-2.6B-QAD-Q4_0.gguf` (1.6 GB) and a `qad/tokenizer.json`, and listed the QAD file under `ExtraFiles` in `geniex.json`. The Q4_0 file itself was unchanged. We removed the extra by backing up `geniex.json`, dropping the `ExtraFiles` entry, and deleting the QAD file. Check `geniex.json` after any re-pull. ✅ (observed)
-
-**Verbose LFM output looks like a slow model.** Check `completion_tokens` against your cap before you measure decode speed. See the request-field table.
+The standard-library [LFM client](../skills/iq9-geniex-lfm/scripts/lfm_client.py) implements caps, output checks, prompt tags, and one retry. Argument schemas and action policy remain the app's responsibility.
 
 ## Server lifecycle: model loading and idle unloading
 
-- **First request after start is slow.** `geniex serve` loads the model on the first request. For LFM2.5-2.6B Q4_0 on the IQ-9075 this adds about 5 s. A cold 128-token request took 10.7–11.0 s, and a warm one took 5.5–5.9 s. ✅ (measured)
-- **Idle unloading.** The model unloads after a period with no requests. The default is 300 s. Change it with `--keepalive` (env `GENIEX_KEEPALIVE`), set when the server starts. ✅ (flag in `geniex serve --help`)
-  - Measured: the model was still loaded at 256 s idle and was unloaded by 316 s. A request after 330 s idle took 7.6 s, against 2.9 s warm. ✅ (measured)
-  - Measured with `--keepalive 30` and with `GENIEX_KEEPALIVE=30`: the model unloaded after 60 s idle, and the next request took about 5 s longer. ✅ (measured)
-  - ```bash
-    geniex serve --compute npu --keepalive 600        # keep the model loaded for 10 minutes idle
-    GENIEX_KEEPALIVE=600 geniex serve --compute npu   # same, using the env var
-    ```
-  - For a demo, set the keepalive longer than the longest quiet gap, or send one request just before the demo.
-- **Memory.** Process RSS was about 172 MB with the model unloaded and about 379 MB with it loaded. This is process RSS only. Device memory is not included. ✅ (measured)
+The first request loads weights. After an idle period, the model may unload and the next request must reload it. The default keepalive is 300 seconds; choose a timeout that covers the demo's quiet gaps:
 
-## Known gap: zero-token responses on v0.8.0
+```bash
+geniex serve --compute npu --keepalive 1800 --log info
+# Alternative configuration:
+GENIEX_KEEPALIVE=1800 geniex serve --compute npu --log info
+```
 
-After several identical requests, `geniex serve --compute npu` returns HTTP 200 with no tokens: `completion_tokens: 0`, `finish_reason: "stop"`, about 11 ms per reply. Streamed and non-streamed calls are both affected, so this is not a streaming bug.
+Send a capped warm-up before the demo and check its answer. Plan the observation interval and user experience around the chosen model's cold and warm request times rather than assuming a fixed reload penalty.
 
-Observed on the IQ-9075 (v0.8.0, LFM2.5-2.6B Q4_0, `max_completion_tokens` 64):
+<a id="known-gap-server-cpu-decode"></a>
+<a id="known-gap-npu-decode-speed"></a>
 
-- **Identical prompt:** full replies for the first 5–7 requests, then zero tokens. Reproduced in three fresh-server runs: one streamed, two non-streamed. The exact count varied between runs.
-- Varied prompts: 240 consecutive requests (120 streamed, 120 non-streamed; 15,360 tokens) with no failures, plus 40 earlier. Median latency stayed at 2.85 s from start to finish.
-- **Identical prompt, 16-token replies:** 30 requests with no failures. So the trigger is not a simple request count.
-- **Restarting `geniex serve` clears it.** The next requests work.
+## Compute and memory
 
-Cause: not confirmed. `geniex-bench` resets state between runs and `geniex serve` does not, so state carried across requests is the main suspect. The default server log shows no error. The earlier "2 of 4 streamed requests" result is most likely this same issue, seen on a server that had already handled several requests.
+Use NPU compute for the reference generator. After a capped request, inspect the current server's device/offload log for `Using 1 device(s): HTP0`. If device output is missing, inspect logs, drivers, permissions, and configuration before concluding which compute route is active.
 
-Workaround: check each reply for `completion_tokens: 0`, restart `geniex serve` when you see one, and vary the prompt. Sensor prompts change naturally.
+The optional d1 gate deliberately runs on the CPU. Keep it sequential with LFM generation. Compare alternative scheduling or compute routes on the app's workload before changing this policy.
 
-## Known gap: NPU decode speed
+Process RSS, peak process RSS, system memory, and device memory describe different resources. Do not use one as a substitute for the others.
 
-The v0.4.0 bench offloads 31 of 31 layers to `HTP0`, so the repeating layers do not fall back to the CPU. Some work still runs on the CPU: the log shows 3 graph splits, a 508 MiB CPU compute buffer, and 205 MiB of CPU-side tensors (probably the token embedding; not confirmed). Weights total about 1.7 GB (1,306 MiB in `HTP0-REPACK`). ✅ (bench log)
+## Benchmarking
 
-Reading the decode numbers against the weight size: 14.3 tok/s moves about 24 GB/s of weights, and 22.6 tok/s moves about 38 GB/s. The v0.8.0 runtime already sustains that rate, so the v0.4.0 runtime is the likely limit. ⚠️ (inference from measured sizes, not a bandwidth measurement)
+Use `geniex-bench` for GGUF prefill and decode timing; match the benchmark version to the runtime. Keep its archive and libraries on the board before the network cut. The [developer guide](developer-guide.md#10-measuring-performance) includes a local-file command.
+
+The [metrics collector](../skills/iq9-demo-prep/scripts/collect_metrics.sh) collects capped server requests and app-log timing. It separates first generated output from first answer content. Its streamed decode rate is an estimate: SSE chunks can bundle tokens. Missing server usage must not be replaced with chunk counts.
+
+## Pitfalls
+
+- **Downloading unnecessarily:** inspect `geniex list`, local weight directories, and disk space first. Import existing assets with approval; never pull models during app runtime.
+- **Deleting to troubleshoot:** do not use `geniex clean` or edit cache metadata as a first response to an error. Ask before removing assets and back up any files being replaced.
+- **Mistaking verbosity for slow inference:** examine token usage, reasoning, and answer content alongside request time.
+- **Installing at runtime:** stage dependencies and archives beforehand. No `pip install`, `geniex pull`, telemetry, or remote UI assets in the running app.
+
+## Python SDK
+
+The examples use the OpenAI-compatible HTTP server and Python's standard library. If you choose GenieX's Python SDK, follow its version-specific setup instructions and stage all of its dependencies before the network cut. SDK installation and HTTP inference are separate integration paths.

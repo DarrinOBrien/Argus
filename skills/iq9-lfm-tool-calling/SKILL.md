@@ -3,20 +3,22 @@ name: iq9-lfm-tool-calling
 description: Add tool and function calling to an app on the IQ-9075 with LiquidAI LFM3-1.7B through GenieX's OpenAI-compatible tools API, with schema validation, an allowlist, and a policy check in code before any write action. Use when the user wants the model to call functions, use tools, drive hardware, or run a multi-step agent loop, or asks about tool_calls on GenieX.
 compatibility: Targets IQ-9075, geniex serve v0.10.0, LiquidAI/LFM3-1.7B-GGUF:Q4_0 in the cache. Tool parsing and rates are not yet measured on the board.
 metadata:
-  version: "0.1"
+  version: "0.2"
 ---
 
 # Tool calling with LFM3-1.7B
 
-The working reference is `examples/tool-calling/tool_calling.py`, and its README has the measured behaviour. Copy its structure: `TOOLS`, `validate()`, `check_policy()`, `run_tool()`, and `run()`. `python3 tool_calling.py --self-test` checks the guards without a server.
+The reference is `examples/tool-calling/tool_calling.py`; its README's model-behavior figures are **historical LFM2-1.2B-Tool/v0.8.0**, not LFM3 results. Current LFM3 native tool parsing/selection still needs integration tests. LFM3-1.7B is a reference default; other cached models may be used after verifying their template, runtime, NPU support, and tool behavior. Copy its structure: `TOOLS`, `validate()`, `check_policy()`, `run_tool()`, and `run()`. `python3 tool_calling.py --self-test` checks the guards without a server.
 
 ## How the API works
 
-- Send a standard OpenAI `tools` array to `/v1/chat/completions`. The reply has `message.tool_calls` and `finish_reason: "tool_calls"`. GenieX does the parsing, so don't parse JSON out of the model's text yourself.
+- Send a standard OpenAI `tools` array to `/v1/chat/completions`. A tool reply is expected to have `message.tool_calls` and `finish_reason: "tool_calls"`; validate the actual envelope, IDs, names, and argument schemas before execution. GenieX does the parsing, so don't parse JSON out of the model's text yourself.
 - Send results back as `{"role": "tool", "tool_call_id": ..., "content": json.dumps(result)}` after the assistant message that holds the `tool_calls`.
 - Measure turn latency and successful tool selection on the board before quoting results.
 - The model sometimes returns two calls in one turn. Run them in order.
-- `LFM3-1.7B` is the shared explainer and tool-call model.
+- `LFM3-1.7B` is the reference explainer/tool model, not an eligibility restriction. d1 is optional; action policy must be code regardless of which decision design is used.
+- `response_error()` rejects zero usage, empty/reasoning-only answers even with positive usage, and malformed tool envelopes. Valid tool calls do not need accompanying text. Argument JSON, schemas, allowlists, and policy are checked separately by `run_tool()`.
+- HTTP/response failures are flushed to JSONL; no action executes from an unusable turn. Report actions from the code's executed list, never model prose.
 
 ## What the previous tool model got wrong (keep these guards)
 
@@ -38,4 +40,4 @@ The working reference is `examples/tool-calling/tool_calling.py`, and its README
 
 ## Turn budget
 
-Cap each turn at `max_completion_tokens` (128 is enough) and cap the turns (`--max-steps 4`). Retry a zero-token turn once with a new tag in the system prompt, as the example does.
+Cap each turn using `max_completion_tokens` and cap the turns (`--max-steps 4`). The example starts at 128 tokens; **this is not a universally sufficient budget**, especially with reasoning enabled. Measure usable answers and valid tool calls, not only latency/usage. Retry an unusable turn once with a new request tag; if it still fails, log the error and stop that run without executing its proposals. Start the generator in a separate terminal using `skills/iq9-geniex-lfm/scripts/serve.sh run` (repo root).

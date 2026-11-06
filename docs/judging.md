@@ -1,6 +1,6 @@
 # Judging and Demos
 
-Scoring as set for the event. If this page ever differs from the organizers' brief, the brief governs. ✅
+Use this rubric to plan the project and its demo. If the organizers' brief differs, follow the brief.
 
 ## Scoring
 
@@ -11,7 +11,7 @@ Scoring as set for the event. If this page ever differs from the organizers' bri
 | 20% | **Originality** | A distinct insight, not another generic chatbot |
 | 15% | **Real-world usefulness** | A clear user, a real need, a plausible next step |
 | 10% | **Performance / efficiency** | Latency, memory, endurance, resource awareness |
-| 10% | **Demo quality** | A concise, credible offline proof |
+| 10% | **Demo quality** | A concise, clear offline demonstration |
 
 ## The first question
 
@@ -24,22 +24,25 @@ Prepare an answer that names a specific constraint. Examples: the network is una
 - **Fastest Agent** — speed of the end-to-end loop
 - **Best Tiny Agent** — the best result for the smallest footprint
 
-Record the numbers that support these claims. See [`runtimes.md`](runtimes.md) for `geniex-bench` and [`developer-guide.md` §10](developer-guide.md#10-measuring-performance).
+Include the app's timing and footprint in the demo. See [`runtimes.md`](runtimes.md) for `geniex-bench` and [`developer-guide.md` §10](developer-guide.md#10-measuring-performance).
 
 ## Demo format
 
-- Two minutes per team, plus one judge question. ✅ (brief)
-- The network is removed for the final demo. Your demo must run with it off. ✅
-- Show the local log of decisions as proof.
-- Prepare a visible timer and a backup recording. ✅ (brief's demo-discipline requirements)
+- Two minutes per team, plus one judge question.
+- The network is removed for the final demo. The core workflow must keep running offline.
+- Show local inputs, decisions, executed actions, and errors from the app's log.
+- Prepare a visible timer, local sample data, and a backup recording.
 
 ## What to measure and show
 
 | Metric | How | Why it matters |
 |---|---|---|
-| Time-to-first-token | `geniex-bench`, or a timed streamed request to the server | Responsiveness |
-| Decode tokens/s | `geniex-bench`, or tokens over time from a streamed request | Endurance and feel |
-| Peak memory | `free -h` or `top` during a run | Footprint |
-| Decision-gate latency | Time d1-2B Path A on the board for the exact questions your app uses | Shows whether the gate fits your observation rate. The old d1-3B and model-card latencies do not apply. |
-| Network-off run | Demo with Ethernet and Wi-Fi unplugged | The core claim |
-| Decision log | Local file with timestamps | Proof the loop ran |
+| Time-to-first-token | Benchmark or timed stream; distinguish generated reasoning from answer content | Responsiveness |
+| Decode tokens/s | Benchmark or usage-based streamed estimate; do not count chunks as tokens | Generation efficiency |
+| Peak process memory | `/usr/bin/time -v`; track system/device memory separately | Footprint |
+| Decision-gate latency | Time the app's actual rule or optional d1 questions on the board | Fits the observation interval |
+| End-to-end loop time | Timing in the app's flushed JSONL | Includes decision, action, and explanation work |
+| Network-off run | Disconnect all uplinks and demonstrate the core workflow | Offline operation |
+| Decision log | Local timestamps, decisions, executed actions, and errors | Explains what the app did |
+
+Use the app's own workload and selected model/precision when collecting numbers. Keep the shared documentation as a reference; put project-specific results in the app's README.

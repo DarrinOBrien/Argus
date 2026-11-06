@@ -2,16 +2,33 @@
 # shellcheck disable=SC2015  # `test && add ok || add FAIL` is intended: add() always returns 0
 # preflight.sh: is this IQ-9075 ready for the hackathon stack? Read-only; changes nothing, downloads nothing.
 #
-#   preflight.sh            human-readable report
-#   preflight.sh --json     one JSON object (for agents)
+#   preflight.sh [--json] [--profile reference|generator|board] [--model cached-name:precision]
+# reference checks the full example stack; generator omits d1; board checks hardware only.
 #
 # Exit 0: no FAIL. Exit 1: at least one FAIL. WARN never fails the run.
 # Env: D1_PYTHON (default ~/.venvs/d1/bin/python), D1_MODEL_DIR (default ~/models/d1-2B),
 #      EXPECT_GENIEX (default v0.10.0), MIN_FREE_GB (default 10), GENIEX_PORT (default 18181)
 
-set -uo pipefail
+set -euo pipefail
 
-JSON=0; [ "${1:-}" = "--json" ] && JSON=1
+JSON=0
+PROFILE=reference
+MODEL="LiquidAI/LFM3-1.7B-GGUF:Q4_0"
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --json) JSON=1; shift ;;
+    --profile|--model)
+      [ $# -ge 2 ] || { echo "missing value for $1" >&2; exit 64; }
+      if [ "$1" = --profile ]; then PROFILE="$2"; else MODEL="$2"; fi
+      shift 2 ;;
+    --help|-h)
+      echo "usage: preflight.sh [--json] [--profile reference|generator|board] [--model cached-name:precision]"
+      exit 0 ;;
+    *) echo "unknown flag: $1" >&2; exit 64 ;;
+  esac
+done
+case "$PROFILE" in reference|generator|board) ;; *) echo "invalid profile: $PROFILE" >&2; exit 64 ;; esac
+[[ "$MODEL" == *:* && -n "${MODEL%:*}" && -n "${MODEL##*:}" ]] || { echo "--model needs a cached name:precision" >&2; exit 64; }
 D1_PYTHON="${D1_PYTHON:-$HOME/.venvs/d1/bin/python}"
 D1_MODEL_DIR="${D1_MODEL_DIR:-$HOME/models/d1-2B}"
 EXPECT_GENIEX="${EXPECT_GENIEX:-v0.10.0}"
@@ -42,68 +59,74 @@ if [ -n "$first_node" ]; then
   else add FAIL npu-access "not readable by $(id -un)" "sudo usermod -aG fastrpc $(id -un), then log in again (ask the user first)"; fi
 fi
 
-free_gb="$(df -BG --output=avail / 2>/dev/null | tail -1 | tr -dc '0-9')"
+free_gb="$(df -BG --output=avail / 2>/dev/null | tail -1 | tr -dc '0-9' || true)"
 if [ -n "$free_gb" ]; then
   [ "$free_gb" -ge "$MIN_FREE_GB" ] && add ok disk "${free_gb}G free on /" \
     || add WARN disk "${free_gb}G free on / (< ${MIN_FREE_GB}G)" "geniex list; remove only models the user confirms are unused"
 fi
 
-mem_gb="$(awk '/MemAvailable/ {printf "%d", $2/1024/1024}' /proc/meminfo 2>/dev/null)"
-[ -n "$mem_gb" ] && { [ "$mem_gb" -ge 20 ] && add ok memory "${mem_gb}G available" \
-  || add WARN memory "${mem_gb}G available (d1-2B fp32 peak is not measured here)" "stop other large processes"; }
+mem_gb="$(awk '/MemAvailable/ {printf "%d", $2/1024/1024}' /proc/meminfo 2>/dev/null || true)"
+if [ -n "$mem_gb" ]; then
+  min_mem=2; [ "$PROFILE" != reference ] || min_mem=20
+  [ "$mem_gb" -ge "$min_mem" ] && add ok memory "${mem_gb} GiB available" \
+    || add WARN memory "${mem_gb} GiB available (planning floor ${min_mem} GiB, not a measured model requirement)" "measure app peak RSS; ask before stopping other processes"
+fi
 
-# ---- geniex -----------------------------------------------------------------------------------------
+# ---- geniex (reference/generator profiles) -----------------------------------------------------------
+if [ "$PROFILE" != board ]; then
 if command -v geniex >/dev/null; then
-  ver="$(geniex version 2>/dev/null | awk -F': *' '/CLI Version/ {print $2}' | tr -d ' ')"
+  ver="$(geniex version 2>/dev/null | awk -F': *' '/CLI Version/ {print $2}' | tr -d ' ' || true)"
   [ "$ver" = "$EXPECT_GENIEX" ] && add ok geniex "$ver" \
-    || add WARN geniex "${ver:-unknown} (migration targets $EXPECT_GENIEX)" "the active stack may not apply; do not reinstall without asking"
-  chip="$(geniex config get chipset 2>/dev/null | tail -1)"
+    || add WARN geniex "${ver:-unknown} (reference target $EXPECT_GENIEX)" "the active stack may not apply; do not reinstall without asking"
+  chip="$(geniex config get chipset 2>/dev/null | tail -1 || true)"
   case "$chip" in *IQ-9075*) add ok chipset "$chip" ;; *) add WARN chipset "${chip:-unknown}" "" ;; esac
-  list="$(geniex list 2>/dev/null)"
-  for m in "LiquidAI/LFM3-1.7B-GGUF Q4_0 FAIL"; do
-    # shellcheck disable=SC2086  # split "repo precision level" on purpose
-    set -- $m
-    if echo "$list" | awk -F'│' -v r="$1" -v p="$2" '{gsub(/ /,"",$2); gsub(/ /,"",$4)} $2==r && $4 ~ p {f=1} END {exit !f}'; then
-      add ok "model:$1" "$2 cached"
-    else
-      add "$3" "model:$1" "$2 not cached" "geniex pull $1:$2 (needs network; check disk first)"
-    fi
-  done
+  list="$(geniex list 2>/dev/null || true)"
+  repo="${MODEL%:*}"; precision="${MODEL##*:}"
+  if echo "$list" | awk -F'│' -v r="$repo" -v p="$precision" '{gsub(/ /,"",$2); gsub(/ /,"",$4)} $2==r && ($4==p || (p=="Q4_0" && $4=="QAD-Q4_0")) {f=1} END {exit !f}'; then
+    add ok "model:$repo" "$precision cached"
+  else
+    add FAIL "model:$repo" "$precision not registered in cache" "inspect existing local weights and disk; ask before any import or download (geniex pull)"
+  fi
 else
   add FAIL geniex "not on PATH" "export PATH=\"\$HOME/.local/bin:\$PATH\", or install per docs/developer-guide.md §3.3"
 fi
 
-if curl -s -o /dev/null -m 3 "http://127.0.0.1:$PORT/v1/models"; then
+if curl -fsS -o /dev/null -m 3 "http://127.0.0.1:$PORT/v1/models" 2>/dev/null; then
   add ok server "geniex serve answering on 127.0.0.1:$PORT"
 else
-  add WARN server "nothing on 127.0.0.1:$PORT" "start it when needed: geniex serve --compute npu"
+  add WARN server "no successful /v1/models response on 127.0.0.1:$PORT" "start a foreground server in a separate pane: skills/iq9-geniex-lfm/scripts/serve.sh run"
+fi
 fi
 
-# ---- d1 (Path A) ------------------------------------------------------------------------------------
+# ---- optional d1 (reference profile only) ------------------------------------------------------------
+if [ "$PROFILE" = reference ]; then
 if [ -x "$D1_PYTHON" ]; then
   # shellcheck disable=SC2016
-  vers="$("$D1_PYTHON" -c 'import torch, transformers; print(torch.__version__, transformers.__version__)' 2>/dev/null)"
+  vers="$("$D1_PYTHON" -c 'import torch, transformers; print(torch.__version__, transformers.__version__)' 2>/dev/null || true)"
   if [ -n "$vers" ]; then add ok d1-venv "$D1_PYTHON (torch/transformers $vers)"
   else add FAIL d1-venv "$D1_PYTHON cannot import torch/transformers" "see examples/system-one-decision/README.md (Install)"; fi
 else
   add FAIL d1-venv "no python at $D1_PYTHON" "see examples/system-one-decision/README.md (Install)"
 fi
 if [ -f "$D1_MODEL_DIR/model.safetensors" ]; then
-  rev="$(cat "$D1_MODEL_DIR/REVISION" 2>/dev/null | tr -d '[:space:]')"
+  rev="$(cat "$D1_MODEL_DIR/REVISION" 2>/dev/null | tr -d '[:space:]' || true)"
   [ "$rev" = "$D1_REVISION" ] && add ok d1-snapshot "$D1_MODEL_DIR @ ${rev:0:12}" \
-    || add FAIL d1-snapshot "REVISION ${rev:-missing} (expected ${D1_REVISION:0:12})" "run examples/system-one-decision/fetch_d1.py; review remote code before moving the pin"
+    || add FAIL d1-snapshot "REVISION ${rev:-missing} (expected ${D1_REVISION:0:12})" "inspect local snapshots first; ask before fetch_d1.py or moving the pin; review remote code"
 else
-  add FAIL d1-snapshot "no model.safetensors in $D1_MODEL_DIR" "$D1_PYTHON examples/system-one-decision/fetch_d1.py --dest $D1_MODEL_DIR (needs network, ~3.8 GB)"
+  add FAIL d1-snapshot "no model.safetensors in $D1_MODEL_DIR" "inspect local snapshots first; ask before fetch_d1.py (needs network, about 3.8 GB)"
+fi
 fi
 
 # ---- thermal (the default sensor) -------------------------------------------------------------------
 zones=0
-for z in /sys/class/thermal/thermal_zone*/temp; do [ -r "$z" ] && cat "$z" >/dev/null 2>&1 && zones=$((zones + 1)); done
+for z in /sys/class/thermal/thermal_zone*/temp; do
+  if [ -r "$z" ] && cat "$z" >/dev/null 2>&1; then zones=$((zones + 1)); fi
+done
 [ "$zones" -gt 0 ] && add ok thermal "$zones readable thermal zones" || add WARN thermal "no readable thermal zones" ""
 
 # ---- network (informational) ------------------------------------------------------------------------
-if curl -s -o /dev/null -m 4 https://huggingface.co; then add ok network "online (pull/install now; the demo runs offline)"
-else add ok network "offline"; fi
+if curl -fsS -o /dev/null -m 4 https://huggingface.co 2>/dev/null; then add ok network "external HTTPS probe succeeded (demo must run offline)"
+else add ok network "external probe failed (offline or endpoint unreachable; not a rehearsal)"; fi
 
 # ---- report -----------------------------------------------------------------------------------------
 if [ "$JSON" -eq 1 ]; then
@@ -111,12 +134,12 @@ if [ "$JSON" -eq 1 ]; then
 import json, sys
 rows = [l.rstrip("\n").split("\t") for l in sys.stdin if l.strip()]
 checks = [{"status": r[0], "check": r[1], "detail": r[2], "fix": r[3] if len(r) > 3 and r[3] else None} for r in rows]
-print(json.dumps({"ready": not any(c["status"] == "FAIL" for c in checks), "checks": checks}, indent=1))'
+print(json.dumps({"ready": not any(c["status"] == "FAIL" for c in checks), "profile": sys.argv[1], "model": sys.argv[2] if sys.argv[1] != "board" else None, "checks": checks}, indent=1))' "$PROFILE" "$MODEL"
 else
   for r in "${RESULTS[@]}"; do
     IFS=$'\t' read -r s n d f <<<"$r"
     printf '[%-4s] %-32s %s\n' "$s" "$n" "$d"
-    [ -n "$f" ] && [ "$s" != ok ] && printf '       fix: %s\n' "$f"
+    if [ -n "$f" ] && [ "$s" != ok ]; then printf '       fix: %s\n' "$f"; fi
   done
   [ "$FAILS" -eq 0 ] && echo "ready" || echo "$FAILS check(s) failed"
 fi

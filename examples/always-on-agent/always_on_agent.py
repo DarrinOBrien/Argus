@@ -10,8 +10,9 @@ Each iteration:
                returns reasoning text (see README).
   5. log       one JSON line per iteration
 
-The loop is sequential, so the gate and the generator never run at the same time. The previous
-stack slowed the gate about 1.9x under concurrency; re-measure this stack before changing the design.
+This reference loop uses d1; other apps may use a rule or another decision design. The loop is
+sequential: dated IQ9 LFM3/d1-2B checks support this policy (README Developer Notes).
+Re-measure the chosen configuration before changing the scheduling policy.
 
 Requires: a GenieX server on --server with the --llm model cached, and the d1-2B snapshot
 at --model-dir (see examples/system-one-decision/README.md).
@@ -32,6 +33,10 @@ from datetime import datetime, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "system-one-decision"))
+
+os.environ["HF_HUB_OFFLINE"] = "1"
+os.environ["TRANSFORMERS_OFFLINE"] = "1"
+os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"
 
 import torch  # noqa: E402
 from transformers import AutoModel  # noqa: E402
@@ -105,7 +110,7 @@ class BoardTelemetry:
 def read_sensors(mode, rng, telemetry=None):
     """The loop's observation. 'board' reads the SoC telemetry (default).
 
-    'simulated' returns random states. 'fixed' repeats one hot state (used to test the zero-token retry).
+    'simulated' returns random states. 'fixed' repeats one hot state for diagnostics.
     """
     if mode == "board":
         return telemetry.read()
@@ -127,7 +132,7 @@ def decide(model, obs):
     with torch.inference_mode():
         a = model.system_one(json.dumps(obs), SENSOR_QUESTIONS)["answers"]
     return {
-        "p_alert": round(a["alert"]["noul"], 4),
+        "p_alert": float(a["alert"]["noul"]),  # Preserve precision for calibration and policy.
         "category": a["category"]["choice"],
         "severity": round(a["severity"]["score"], 3),
         "gate_ms": round((time.perf_counter() - t0) * 1000, 1),
@@ -162,10 +167,8 @@ def build_prompt(obs, decision, stable_prompt, tag=None):
     d = {k: decision[k] for k in ("p_alert", "category", "severity")}
     p = ("Explain this alert to an operator in one sentence. "
          f"Observation: {json.dumps(obs)}. Decision: {json.dumps(d)}.")
-    if not stable_prompt:
-        p += f" Time: {now_iso()}."
-    if tag:
-        p += f" [{tag}]"
+    if tag or not stable_prompt:
+        p += f" [request:{tag or uuid.uuid4().hex}]"
     return p
 
 
@@ -192,20 +195,23 @@ def complete(server, model_name, user_text, max_tokens):
 
 
 def explain(server, model_name, obs, decision, max_tokens, stable_prompt):
-    """One explanation. A zero-token reply
-    is retried once with a unique tag. Failures are logged and the loop keeps running."""
+    """Retry zero-token or empty-answer output once; log persistent failure without restarting."""
     out = {"ok": False, "retried": False, "zero_token_first_try": False,
+           "empty_response_first_try": False,
            "text": None, "tokens": 0, "finish": None, "ms": None, "error": None}
     try:
         r = complete(server, model_name, build_prompt(obs, decision, stable_prompt), max_tokens)
         if r["tokens"] == 0 or not r["text"]:
-            out["zero_token_first_try"] = True
+            out["zero_token_first_try"] = r["tokens"] == 0
+            out["empty_response_first_try"] = not bool(r["text"])
             out["retried"] = True
             r = complete(server, model_name,
                          build_prompt(obs, decision, stable_prompt, tag=uuid.uuid4().hex[:8]), max_tokens)
         out.update(text=r["text"] or None, tokens=r["tokens"], finish=r["finish"], ms=r["ms"],
                    ok=r["tokens"] > 0 and bool(r["text"]))
-    except (urllib.error.URLError, OSError, KeyError, ValueError) as e:
+        if not out["ok"]:
+            out["error"] = "zero-token or empty-answer reply after retry"
+    except (urllib.error.URLError, OSError, KeyError, ValueError, TypeError, IndexError) as e:
         out["error"] = f"{type(e).__name__}: {e}"[:200]
     return out
 
@@ -232,7 +238,7 @@ def main():
                     help="board: the board's thermal zones (default). simulated: random states. "
                          "fixed: one hot state (for tests)")
     ap.add_argument("--stable-prompt", action="store_true",
-                    help="leave the timestamp out of explanation prompts (used to test the zero-token retry)")
+                    help="diagnostics only: repeat initial raw prompts without request tags")
     ap.add_argument("--log", default="agent_log.jsonl")
     ap.add_argument("--seed", type=int, default=None)
     args = ap.parse_args()
@@ -250,7 +256,8 @@ def main():
     if not server_ready(args.server):
         sys.exit(f"no GenieX server at {args.server}. Start it with: geniex serve --compute npu")
 
-    model = AutoModel.from_pretrained(model_dir, trust_remote_code=True, dtype=torch.float32)
+    model = AutoModel.from_pretrained(model_dir, trust_remote_code=True, local_files_only=True,
+                                      dtype=torch.float32)
     model = model.to("cpu").eval()
     print(f"gate loaded: d1-2B fp32 on CPU, threads={torch.get_num_threads()}", flush=True)
     print(f"generator:   {args.llm} via {args.server}", flush=True)
