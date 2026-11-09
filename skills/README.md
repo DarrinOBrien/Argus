@@ -4,6 +4,7 @@ Agent skills for building on the Dragonwing IQ-9075 with LiquidAI models. Each f
 
 | Skill | Scripts |
 |---|---|
+| [`iq9-getting-started`](iq9-getting-started/SKILL.md) | none; guided UART/network/SSH setup, approved staging, and first NPU response using existing helpers |
 | [`iq9-preflight`](iq9-preflight/SKILL.md) | `preflight.sh [--json] [--profile reference\|generator\|board] [--model M]`: selected-stack readiness |
 | [`iq9-geniex-lfm`](iq9-geniex-lfm/SKILL.md) | `serve.sh run\|start\|stop\|restart\|status` (prefer foreground `run` in a separate terminal), `lfm_client.py` |
 | [`iq9-d1-decision-gate`](iq9-d1-decision-gate/SKILL.md) | `calibrate_threshold.py`: threshold sweep, AUC/confusion matrices, separate held-out `--eval` |
@@ -14,17 +15,19 @@ Agent skills for building on the Dragonwing IQ-9075 with LiquidAI models. Each f
 
 ## Using them
 
+For first-time access, setup internet, or an unknown board state, start with [`iq9-getting-started`](iq9-getting-started/SKILL.md). It coordinates the guide, preflight, and generator skills; it is not an unattended installer. The guided onboarding flow is not yet board-rehearsed.
+
 - **Claude Code** finds them in `.claude/skills/`. **Codex, pi, and other agents** that follow the `.agents/skills/` convention find them there. Both folders are symlinks to this one.
 - **Any other agent:** `AGENTS.md` at the repo root links every skill. You can also point the agent at a `SKILL.md` directly.
 - To use them across projects, symlink a skill folder into your agent's user skills folder (for example `~/.claude/skills/` or `~/.agents/skills/`).
 
 Shell examples using `skills/...` or `examples/...` run from the repo root unless stated otherwise. Markdown links resolve from the skill file. When installing skills elsewhere, retain the referenced repo examples or use their explicit paths.
 
-LFM3-1.7B and d1-2B are reference defaults, not competition requirements. d1 and external sensors are optional; sensors are not supplied. Verify each chosen model/configuration rather than transferring reference results.
+LFM3-1.7B and d1-2B are reference defaults, not competition requirements. d1 and external sensors are optional; sensors are not supplied. Verify each chosen model/configuration on the board.
 
 ## Adding or changing a skill
 
 - The folder name matches `name:` (lowercase letters and hyphens, at most 64 characters). The `description` says what the skill does and when to use it, in at most 1024 characters.
-- Performance numbers need dated board evidence and a source link. Identify the board, runtime, model/build/precision, n, and medians; mark prior results and estimates explicitly. Suggested caps, sample sizes, and planning floors are defaults/guidance, not measured guarantees. Never promote unverified behavior or local mock tests to board results.
+- Performance numbers must be measured for the app: identify the board, runtime, model/build/precision, n, and medians, and mark estimates as estimates. Suggested caps, sample sizes, and planning floors are defaults/guidance, not measured guarantees. Never promote unverified behavior or local mock tests to board results.
 - Scripts: run `--help` or `--self-test` cleanly. Bash scripts must pass `shellcheck`.
 - Test on an IQ-9075 before you merge, and note the GenieX version.

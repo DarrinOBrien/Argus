@@ -1,10 +1,22 @@
-# On-Device AI Hackathon: Cleared for Takeoff ✈️
+# On-Device AI Hackathon: Cleared for Takeoff
 
 **LiquidAI × Qualcomm Dragonwing**
 
 Reference documentation for the hackathon: build on-device AI agents with **LiquidAI** models on the **Qualcomm Dragonwing IQ-9075 EVK**, then demonstrate them with the network removed.
 
-> **Start here:** [`docs/developer-guide.md`](docs/developer-guide.md). Using a coding agent? Point it at [`AGENTS.md`](AGENTS.md).
+> **Start here:** [`docs/developer-guide.md`](docs/developer-guide.md). Using a coding agent? Open this repo in your agent and use the prompt below. [`AGENTS.md`](AGENTS.md) and the [getting-started skill](skills/iq9-getting-started/SKILL.md) guide it through access, setup, and verification.
+
+## Get started with your agent
+
+> Let's get started with this repo on my IQ9. Read `AGENTS.md` and `docs/developer-guide.md`.
+>
+> First, help me access the board and get it connected to the internet for setup. Ask what connections I have available and guide me through any manual steps.
+>
+> Then check what's already installed and propose a setup plan. Reuse existing software and models, and ask before installations, downloads, or system and network changes.
+>
+> Start with the reference LFM generator; leave d1 optional. Verify a useful local response and confirm NPU execution, then summarize what's working, what remains unverified, and which example to try next.
+
+No SSH connection yet? Start with the board's **micro-USB debug UART**, then configure Wi-Fi with `nmcli` or use Ethernet. Event boards use username **`ubuntu`**, password **`liquidxqualcomm`** for UART and SSH. See [board access and internet for setup](docs/developer-guide.md#0-board-access-and-internet-for-setup) for host-specific steps, password handling, and network checks. Internet is for approved setup/staging; the final demo still runs without external network access.
 
 ## Platform and models
 
@@ -61,7 +73,7 @@ Judging weights and the "why not just a cloud API call?" question are in [`docs/
 | `AGENTS.md`                     | Instructions for coding agents: rules, skills, where to run, what to ask before doing                                                                                          |
 | `apps/`                         | Where hackathon projects go (`skills/iq9-always-on-agent/scripts/scaffold.sh apps/<name>`)                                                                                     |
 
-**Start from working examples:** This repo includes a model inference sample, a local agent, a guarded tool-calling example, and a starter check. After completing setup, run `./starter/run.sh` to check your board and models before building your project.
+**Start from working examples:** First complete [generator setup and verification](skills/iq9-getting-started/SKILL.md#5-verify-the-first-generator-milestone), without requiring d1. Then explore model requests, a local agent, or guarded tool calling. `./starter/run.sh` is an optional **full two-model reference check** after setting up both LFM and d1, not the first onboarding step.
 
 ## Developer Notes
 
@@ -71,30 +83,40 @@ Judging weights and the "why not just a cloud API call?" question are in [`docs/
 
 **SSH is not affected by this monitor issue.** A headless setup using SSH and an app web server over a configured **USB-C network link** is allowed during the network-off demo. Keep the link local-only: disable internet sharing/forwarding on the laptop and remove all external uplinks. Serve UI assets locally and keep inference on the board. See [display and USB-C access](docs/offline-readiness.md#display-and-usb-c-access) for the checklist and SSH port forwarding.
 
-This setup warning is separate from the dated model/runtime checks below; those checks did not verify monitor recovery or a USB-C network-off demo.
+### Rules for the reference stack
 
-### Reference-stack checks — 2026-11-05
+These apply to GenieX v0.10.0 with LFM3-1.7B Q4_0 on the NPU and, if used, d1-2B on the CPU. Re-check them for any other model or runtime.
 
-🧪 Checked on an IQ-9075 on **2026-11-05**, with **GenieX v0.10.0**, **LFM3-1.7B Q4_0 on HTP0**, and **d1-2B fp32 on the CPU (8 threads)**. These observations apply to the tested configuration, not every LFM3-family model; re-test your chosen model and runtime.
-
-* **If using d1-2B, run it through Transformers on the CPU.** Transformers passed the typed-answer, image, and batch checks. GenieX `/v1/decisions` requests with d1-2B **Q4_K_M GGUF on CPU** returned an unsupported-parameter error in all five attempts; `/v1/systemone` returned 404. Keep the decision layer on Transformers for this stack.
-* **Cap every request and validate the answer.** Use `max_completion_tokens` on chat and `max_tokens` on raw completions. Caps were honored and no zero-token replies occurred in 205 recorded LFM requests; retain the retry as a defensive fallback. **Positive token usage can still accompany empty answer content.** For text-answer requests, treat empty `content` as a failure; for tool requests, validate `tool_calls` instead.
-* **LFM3-1.7B reasons by default.** For direct answers, try `enable_think: false` on chat or a raw completion with the reasoning block closed. Both helped in the one-sentence probes, but the chat flag did not guarantee a usable answer in a tight-cap test. Check `content` and `reasoning_content` before the demo.
-* **Avoid identical raw-completion prompts.** Repeated identical `/v1/completions` requests returned continuing commentary instead of fresh direct answers, despite nonzero token counts. Include a unique event timestamp or tag in each prompt and validate the output; cache/state handling is only a suspected cause.
-* **Allow for idle unloading.** The default keepalive is 300 s, and idle unloading was observed. Both `--keepalive` and `GENIEX_KEEPALIVE` worked in the tests. Set the timeout longer than the demo's quiet gaps or send a warm-up request. Measure reload latency for your model rather than using the previous stack's figures. See [`docs/runtimes.md`](docs/runtimes.md#server-lifecycle-model-loading-and-idle-unloading).
-* **Keep the gate and generator sequential.** With the configuration above, the same three-question decision took a median **2.848 s alone** versus **5.572 s during LFM generation** (**n=5 per condition**, paired runs). Re-measure before changing the scheduling policy.
-* **Calibrate the decision gate on your task.** In a 36-state synthetic check, threshold 0.5 missed 9 of 18 positive cases. This is an illustration, not production calibration. Label your app's own states, evaluate on held-out data, and do not copy thresholds between models or tasks. See [`calibrate_threshold.py`](skills/iq9-d1-decision-gate/scripts/calibrate_threshold.py).
+* **Run d1-2B through Transformers on the CPU**, not GenieX's `/v1/decisions` or `/v1/systemone` endpoints.
+* **Cap every request and validate the answer.** Use `max_completion_tokens` on chat and `max_tokens` on raw completions. A reply can report tokens and still have empty `content`: treat that as a failure for text requests, and validate `tool_calls` for tool requests. Keep one retry as a fallback.
+* **LFM3-1.7B reasons by default.** For direct answers, use `enable_think: false` on chat or a raw completion with the reasoning block closed. Neither guarantees a usable answer, so check `content`.
+* **Make raw-completion prompts unique.** Identical `/v1/completions` prompts can return continuing commentary instead of a fresh answer. Add an event timestamp or tag.
+* **Plan for idle unloading.** The default keepalive is 300 s. Set `--keepalive` or `GENIEX_KEEPALIVE` longer than the demo's quiet gaps, or send a warm-up request. See [`docs/runtimes.md`](docs/runtimes.md#server-lifecycle-model-loading-and-idle-unloading).
+* **Run the decision gate and the generator one at a time.** d1 slows down substantially while the LFM is generating.
+* **Calibrate the decision gate on your own task.** Do not use 0.5 or another app's threshold. Label your app's states and evaluate on held-out data with [`calibrate_threshold.py`](skills/iq9-d1-decision-gate/scripts/calibrate_threshold.py).
 
 ## Quick start
 
-On the IQ-9075, after the setup steps in the developer guide:
+On the IQ-9075, after the [setup steps](docs/developer-guide.md#3-setup), from the repo root:
 
 ```bash
-geniex list                                              # check what is already cached before pulling
-geniex infer LiquidAI/LFM3-1.7B-GGUF:Q4_0 --compute npu
+bash skills/iq9-preflight/scripts/preflight.sh --profile generator --json
 ```
 
-Then set up the decision layer: [`examples/system-one-decision`](examples/system-one-decision/README.md).
+Reuse an appropriate existing server, or run this in a separate board terminal:
+
+```bash
+skills/iq9-geniex-lfm/scripts/serve.sh run
+```
+
+Then send a capped, validated request and inspect the current server's NPU evidence:
+
+```bash
+python3 skills/iq9-geniex-lfm/scripts/lfm_client.py --sentence 'Explain why local inference is useful when the internet is unavailable.'
+skills/iq9-geniex-lfm/scripts/serve.sh status
+```
+
+Check the answer and the current server's `HTP0` log line; a preflight pass alone is not verification. See the [generator skill](skills/iq9-geniex-lfm/SKILL.md) for server reuse and output guards. If your project needs d1, set it up separately with [`examples/system-one-decision`](examples/system-one-decision/README.md); it is optional.
 
 ## Licensing
 

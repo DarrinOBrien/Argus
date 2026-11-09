@@ -46,7 +46,9 @@ Reuse the board's existing torch installation when creating the d1 environment. 
 
 ## First-time setup
 
-Follow the [Qualcomm IQ-9075 setup guide](https://dragonwingdocs.qualcomm.com/Ubuntu/devices/iq9075-evk/set-up-the-device) for board setup. Flashing, camera pipelines, and model conversion are outside this repository's scope.
+Start with [board access and internet for setup](developer-guide.md#0-board-access-and-internet-for-setup): use the micro-USB debug UART when SSH is not yet available, configure Wi-Fi with `nmcli` or use Ethernet, and verify setup connectivity from the board. Event UART/SSH login is `ubuntu` / `liquidxqualcomm`; the upstream initial password differs.
+
+These steps adapt the [Qualcomm Ubuntu IQ-9075 setup guide](https://dragonwingdocs.qualcomm.com/Ubuntu/devices/iq9075-evk/set-up-the-device). Flashing, camera pipelines, and model conversion are outside this repository's scope.
 
 Before installing or changing system software, inspect the current setup and obtain approval from the board owner.
 

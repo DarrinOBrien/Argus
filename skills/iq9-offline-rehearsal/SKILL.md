@@ -1,19 +1,19 @@
 ---
 name: iq9-offline-rehearsal
-description: Get a Dragonwing IQ-9075 app ready for the network-off demo and rehearse it. Covers a static audit for repo-ID loads, URLs, CDN assets, telemetry, and install-time fetches; staging models, wheels, and archives while the network is up; the network-off run; and evidence for the judges. Use before the network is cut, at T-1, when the user says "offline", "network cut", "airplane mode", "rehearsal", or "will this work without internet".
+description: Get a Dragonwing IQ-9075 app ready for the network-off demo and rehearse it. Covers a static audit for repo-ID loads, URLs, CDN assets, telemetry, and install-time fetches; USB-first model copying/imports and staging wheels/archives before the cut; the network-off run; and evidence for the judges. Use before the network is cut, at T-1, when the user says "offline", "network cut", "airplane mode", "rehearsal", or "will this work without internet".
 compatibility: Audit script runs anywhere with Python 3. The rehearsal runs on the IQ-9075.
 metadata:
-  version: "0.2"
+  version: "0.3"
 ---
 
 # Offline rehearsal
 
-The event ends with the network removed. A project that only works online scores zero on the main constraint. The checklist and the common failures are in `docs/offline-readiness.md`. This skill is the procedure. [Prior reference checks](../../README.md#developer-notes) used local/offline model loading while the network stayed connected; they are **not a physical network-off rehearsal**.
+The event ends with the network removed. A project that only works online scores zero on the main constraint. The checklist and the common failures are in `docs/offline-readiness.md`. This skill is the procedure. Offline loading settings with the network still connected are **not** a network-off rehearsal.
 
 ## 1. Static audit (run on the app's code)
 
 ```bash
-python3 skills/iq9-offline-rehearsal/scripts/offline_audit.py apps/<name>
+python3 skills/iq9-offline-rehearsal/scripts/offline_audit.py apps/my-agent
 ```
 
 | Finding | Fix |
@@ -27,9 +27,11 @@ python3 skills/iq9-offline-rehearsal/scripts/offline_audit.py apps/<name>
 
 This is a heuristic static check, not proof of offline operation. Inspect runtime imports/dependencies and each warning. Finding an offline environment variable in text does not prove it is active; enforce `local_files_only=True` for Transformers and offline/telemetry settings before imports. Step 3 tests the whole app.
 
-## 2. Stage everything while the network is up
+## 2. Stage everything before the network cut
 
-Inspect `geniex list`, existing local model directories, and `df -h /` first. **Ask before every `geniex pull` (including local imports), `fetch_d1.py`, installation/system change, or deletion**, regardless of size. Reuse local weights with an approved import rather than downloading again; never re-pull cached models. Run long staging jobs in a separate terminal and verify exit status.
+Inspect `geniex list`, existing local model directories, and `df -h /` first. **Ask whether the participant has the supplied USB model drive and USB-C dongle/adapter.** Prefer compatible USB/local assets over network downloads; follow [USB model staging](../../docs/developer-guide.md#usb-model-drive-copy-never-move). Copy/import the selected full asset set onto board storage; **never move files, delete the USB source, or depend on that removable drive at runtime**. Verify the copy and registration, then test startup without the model drive attached after approved safe ejection.
+
+**Ask before every model copy, `geniex pull` (including local imports), `fetch_d1.py`, installation/system change, mount/eject, or deletion**, regardless of size. Never re-pull cached models. Network access is needed only for separately approved missing software/assets, not for USB copies. Run long staging jobs in a separate terminal, retain logs, and verify exit status.
 
 - [ ] Run `geniex list` and confirm every model the app uses is cached. Run `geniex version` and confirm v0.10.0.
 - [ ] **If the app uses d1**, confirm `~/models/d1-2B/REVISION` reads `10e7671d44e4…`. Otherwise use `preflight.sh --profile generator --model <cached-name:precision>` (or `--profile board` without a generator). Reference defaults are not mandatory models.
@@ -55,7 +57,7 @@ Do not use a generic one-interface `ip link ... down` one-liner: it can leave an
 
 ## 4. Recovery drill (T-1)
 
-- If an already-cached, previously tested stack is useful, keep it as an optional rollback. Do not require participants to download a legacy model or delete their chosen models.
+- If an already-cached, previously tested stack is useful, keep it as an optional rollback. Do not require participants to download another model or delete their chosen models.
 - A recorded decision log and a recorded video, in case the live demo fails.
 - Know where the log lives, and have a one-line command ready to show its last entries.
-- Know how to safely stop and relaunch the owned foreground server. The old zero-token failure was not reproduced in current reference checks; retain recovery for persistent failures, not as a guaranteed diagnosis.
+- Know how to safely stop and relaunch the owned foreground server. Keep the recovery step for persistent failures.

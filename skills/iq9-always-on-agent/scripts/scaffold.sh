@@ -88,13 +88,13 @@ Load d1 from the pinned local snapshot with offline settings; use only an alread
 
 ## Measured (fill in after running this app)
 
-Record board/date, GenieX version, model/build and precision, sample count, and medians. Do not copy prior reference numbers as this app's measurements.
+Record board/date, GenieX version, model/build and precision, sample count, and medians.
 
 | Metric | Value | How |
 |---|---|---|
-| Gate latency | ⚠️ | median \`decision.gate_ms\` |
-| Loop with explanation | ⚠️ | median \`loop_ms\` where action=log_alert |
-| Network-off run | ⚠️ | skills/iq9-offline-rehearsal |
+| Gate latency |  | median \`decision.gate_ms\` |
+| Loop with explanation |  | median \`loop_ms\` where action=log_alert |
+| Network-off run |  | skills/iq9-offline-rehearsal |
 EOF
 
 echo "created $DEST:"

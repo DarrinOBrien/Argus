@@ -6,3 +6,6 @@ venv/
 *.log
 metrics.json
 .DS_Store
+
+# Local onboarding/session scratch (not shared guidance)
+.iq9-onboarding/

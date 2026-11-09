@@ -1,14 +1,16 @@
 ---
 name: iq9-geniex-lfm
 description: Call LiquidAI LFM models through GenieX on the Dragonwing IQ-9075. Covers starting and stopping geniex serve, capped requests, one-sentence answers from LFM3-1.7B, empty replies, cold starts, idle unloading, NPU checks, and model choice. Use whenever app code talks to an LFM, to geniex serve, or to http://127.0.0.1:18181.
-compatibility: Targets the IQ-9075 (aarch64, Ubuntu 24.04) with GenieX CLI v0.10.0. The client works from any Python 3.10+ that can reach the local server. Reference checks are dated and configuration-specific; see README Developer Notes.
+compatibility: Targets the IQ-9075 (aarch64, Ubuntu 24.04) with GenieX CLI v0.10.0. The client works from any Python 3.10+ that can reach the local server.
 metadata:
-  version: "0.2"
+  version: "0.4"
 ---
 
 # GenieX and LFM on the IQ-9075
 
-Start with [README Developer Notes](../../README.md#developer-notes) for dated reference checks; [Runtimes](../../docs/runtimes.md) gives format, precision, and API guidance. Prefer version-matched board evidence over stale migration claims. LFM3-1.7B is a reference default, not a required participant model; verify any chosen model's template, format, NPU support, and task behavior.
+Start with the [reference-stack rules](../../README.md#rules-for-the-reference-stack); [Runtimes](../../docs/runtimes.md) gives format, precision, and API guidance. LFM3-1.7B is a reference default, not a required participant model; verify any chosen model's template, format, NPU support, and task behavior.
+
+**Missing NPU packages:** use the [driver setup guide](../../docs/developer-guide.md#32-driver-packages) with approval, refreshing existing APT sources and simulating only the missing packages before installation. Package-file `404 Not Found` errors can come from stale image indexes; follow [stale APT recovery](../../docs/developer-guide.md#stale-apt-lists-and-package-file-404s), not a broad upgrade, new PPA, `--fix-missing`, or Adreno change. Record the actual installed package/runtime versions and verify current-server `HTP0`; refreshed QAIRT candidates alone do not establish compatibility.
 
 ## 1. Server
 
@@ -26,7 +28,7 @@ skills/iq9-geniex-lfm/scripts/serve.sh stop      # only when safe to interrupt t
 - The server listens on loopback only, at `127.0.0.1:18181`, and never downloads models.
 - **Headless demo:** SSH is unaffected by the organizer-reported Adreno monitor issue. Keep GenieX on loopback and use SSH port forwarding for a board-hosted app web UI over a configured, isolated USB-C network link; disable laptop internet sharing/forwarding. Monitor setups must remove/roll back the Adreno APT update with approval, not reinstall/update `qcom-adreno1` as a generic NPU fix. See [Developer Notes](../../README.md#external-monitors-and-headless-setups) and [USB-C access](../../docs/offline-readiness.md#display-and-usb-c-access).
 - `kill $!` does not stop it, because `geniex` is a launcher. `serve.sh stop` stops the process that holds the port. Never use `pkill -f "geniex serve"` over SSH; it also matches the SSH command itself.
-- **Cold start:** the first request loads weights. Measure the chosen model's cold/reload penalty; do not transfer the legacy five-second figure.
+- **Cold start:** the first request loads weights. Measure the chosen model's cold/reload time.
 - **Idle unload:** the model unloads after `--keepalive` seconds idle (300 s by default). `serve.sh` sets 1800 s. Before a demo, send one warm-up request.
 - **Is the NPU in use?** With `--log info`, the log shows `Using 1 device(s): HTP0`. `serve.sh status` prints that line. Send a capped request first and verify that the log belongs to this server. A missing `HTP0` line calls for investigation, not a CPU-fallback conclusion; see `docs/developer-guide.md` §12. `geniex infer` is interactive, so don't run it from an agent.
 
@@ -47,7 +49,7 @@ Rules to preserve. The client caps by default, validates usable output/tool enve
 | Rule | Why |
 |---|---|
 | Cap every call: `max_completion_tokens` on chat, `max_tokens` on `/v1/completions` | Bounds latency and output on the edge |
-| For direct LFM3-1.7B answers, try `chat(..., enable_think=False)` or `sentence()` with a closed reasoning block | Dated probes passed, but neither method guarantees a usable answer; re-test other models |
+| For direct LFM3-1.7B answers, try `chat(..., enable_think=False)` or `sentence()` with a closed reasoning block | Neither method guarantees a usable answer; re-test other models |
 | Reject zero tokens, empty answers, or reasoning alone. For tools, check the envelope and validate schemas/allowlists/policy before execution | Positive token usage is not proof of usable output. Retry once; persistent failure returns `ok=False` and an error |
 | Make raw prompts unique before the first call | Identical raw prompts returned continuing commentary with positive tokens. `complete()` tags them by default; `unique=False` is diagnostics only |
 | Send `"stream": false` unless you need streaming | Easier token accounting |
@@ -58,17 +60,19 @@ Rules to preserve. The client caps by default, validates usable output/tool enve
 
 ## 3. Timing to plan around
 
-🧪 Prior checks on 2026-11-05: IQ-9075, GenieX v0.10.0 / QAIRT 2.50 / llama.cpp `19cce69`, LFM3-1.7B **QAD-Q4_0** on HTP0. Caps held across 205 recorded requests; the legacy zero-token failure was not reproduced, not declared fixed. Reasoning-only empty output still occurred with positive usage. Raw-repeat cache/state handling is a hypothesis, not a confirmed cause.
-
-The default 300-second idle timeout and both keepalive controls were observed; the default-timeout reload timing had only one post-idle observation. Run `skills/iq9-demo-prep/scripts/collect_metrics.sh` for this app's fresh metrics, including usable-answer checks. Keep optional d1 and the LFM sequential: current reference contention checks support that policy. Stored results are not fresh results for the user's board.
+The default idle timeout is 300 s; `--keepalive` and `GENIEX_KEEPALIVE` both change it. The first request after an unload reloads the weights. Run `skills/iq9-demo-prep/scripts/collect_metrics.sh` for this app's metrics, including usable-answer checks. Keep optional d1 and the LFM sequential.
 
 ## 4. Picking a model
 
-Run `geniex list`, inspect existing local weight directories, and check `df -h /` first. **Ask before every pull or local import**, and never re-pull cached weights. Existing GGUFs can be imported with approval using `geniex pull <name>:<precision> --local-path <directory>`; this copies into the cache without downloading weights. Never run `geniex clean` or `geniex remove` without approval. Cached registered model names are allowed in inference requests; runtime downloads are not.
+Run `geniex list`, inspect existing local weight directories, and check `df -h /` first. **Ask whether the participant has the supplied USB model drive and USB-C dongle/adapter before proposing a download.** Reuse registered models without another import; for missing models, prefer compatible USB/local assets and follow [USB model staging](../../docs/developer-guide.md#usb-model-drive-copy-never-move).
+
+**Ask before every copy, pull, or local import. Copy, never move:** import the selected model directory with `geniex --skip-update pull <name>:<precision> --model-hub localfs --local-path <observed-directory>`. This copies into the cache without downloading weights; leave the USB source intact. Do not manually populate/edit GenieX cache metadata, use `mv` or destructive sync, or delete the source after import. Include the matching tokenizer/template/modality assets and allow space for any intermediate copy. Verify cache registration and copied file sizes/checksums, then a capped useful response and current-server `HTP0`. Run long imports in a separate terminal.
+
+Only propose a separately approved download if compatible board/local/USB assets are unavailable. Never re-pull cached weights or run `geniex clean`/`geniex remove` without approval. Cached registered model names are allowed in inference requests; runtime downloads are not.
 
 Use [README: Platform and models](../../README.md#platform-and-models) to find LiquidAI's published models, not a fixed shortlist. The examples default to `LiquidAI/LFM3-1.7B-GGUF:Q4_0`; other LFM3-family and LFM models are options. Check the selected model's [format, precision, and compute route](../../docs/runtimes.md#model-format-and-precision), and stage its [full matching asset set](../../docs/offline-readiness.md#disk-first). Vision and audio require supported modality-specific request handling. Re-test NPU execution, usable answers, and tool calls on the board for the chosen configuration.
 
-Put any new number in the app's README with its marker (🧪 measured, ⚠️ unverified) and the GenieX version.
+Put any new number in the app's README with the GenieX version, labelled as measured or unverified.
 
 ## 5. Don'ts
 

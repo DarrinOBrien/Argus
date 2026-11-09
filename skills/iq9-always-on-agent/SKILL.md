@@ -13,7 +13,7 @@ This is the flagship track ("02 — Always-On Local Agent"). Start from `example
 ## Start
 
 ```bash
-skills/iq9-always-on-agent/scripts/scaffold.sh apps/<name>
+skills/iq9-always-on-agent/scripts/scaffold.sh apps/my-agent   # choose your app's name
 ```
 
 The new folder holds `agent.py` (the example loop), `questions.py` (the d1 questions), `lfm_client.py` (from `iq9-geniex-lfm`), and a README to fill in. Run the smoke test in that README before you change anything.
@@ -21,9 +21,9 @@ The new folder holds `agent.py` (the example loop), `questions.py` (the d1 quest
 ## Design rules
 
 1. **Decide before you generate.** The reference loop calls d1 on observations; a rule or candidate prefilter may be more appropriate for your app. The LFM runs only when the action needs words.
-2. **Sequential, not parallel.** [Prior IQ9 checks](../../README.md#developer-notes), 2026-11-05: GenieX v0.10.0, LFM3-1.7B QAD-Q4_0 on HTP0; d1-2B fp32 CPU, 8 threads, Transformers 5.19.0 / torch 2.11.0. The same three-question gate had median **2.848 s alone** versus **5.572 s during generation**, **n=5 per condition**, paired. Keep sequential execution; re-measure before changing it.
+2. **Sequential, not parallel.** d1 slows down substantially while the LFM generates. Keep sequential execution; re-measure before changing it.
 3. **Allowlist actions in code.** `ALLOWED_ACTIONS` plus `run_action()`. A new action goes on the list on purpose. Anything else is refused and logged. Actions that change the outside world (GPIO, a relay, a message) need a rule in code *in addition to* the d1 probability.
-4. **Calibrated threshold.** The previous d1-3B gate did not track board temperature. Use `iq9-d1-decision-gate` to calibrate d1-2B, or use a rule, before trusting alerts.
+4. **Calibrated threshold.** d1 may not track raw board temperature. Use `iq9-d1-decision-gate` to calibrate d1-2B, or use a rule, before trusting alerts.
 5. **Log every iteration** as one JSON line, flushed: state, decision, action, explanation, timings, and errors. It is the judges' offline proof.
 6. **Degrade gracefully.** Input errors, timeouts, zero tokens, and empty/reasoning-only answers must be logged. Validate actual answer content, not just `ok` or usage; the loop keeps going. Raw prompts need a unique event tag before the first call. Do not automatically interrupt a shared server.
 
@@ -48,7 +48,7 @@ Run these from the generated app's directory. Use a separate terminal for long r
 ```
 
 - Normal iteration lines have `decision`, `action`, and `loop_ms`; input-error lines record the error. Successful alert explanations require `ok: true`, positive tokens, and nonempty text. Failed explanations require an error and must not stop the loop.
-- `zero_token_first_try` records actual zero usage; `empty_response_first_try` records an empty answer. Check retry and error fields, not just flags. The legacy zero-token bug was not reproduced in the current suite.
+- `zero_token_first_try` records actual zero usage; `empty_response_first_try` records an empty answer. Check retry and error fields, not just flags.
 - Identical raw prompts can yield unwanted continuing commentary with positive tokens. Treat `--stable-prompt` as diagnostics only; normal runs tag the first request. The repetition test is not an answer-quality benchmark.
 - Run it on real input for at least 10 minutes, and look at the spread of `p_alert` before you pick a threshold.
 - Then rehearse with the network off (`iq9-offline-rehearsal`).

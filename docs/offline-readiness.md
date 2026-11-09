@@ -11,9 +11,9 @@ df -h /
 geniex list
 ```
 
-Inspect existing local model directories as well as the cache. A missing cache entry does not mean the weights are absent. Reuse local weights with an approved import where possible.
+Inspect existing local model directories as well as the cache. A missing cache entry does not mean the weights are absent. **Ask whether the participant has the supplied USB model drive and USB-C dongle/adapter** before proposing downloads. Follow [USB model staging](developer-guide.md#usb-model-drive-copy-never-move): copy/import the selected assets onto board storage, never move them, and leave the source drive unchanged. Budget for intermediate copies; reuse registered models without re-importing.
 
-For approximate reference-stack staging, the LFM3-1.7B QAD-Q4_0 weights use about **1.05 GB**; the optional d1-2B Transformers snapshot uses about **3.84 GB**. For another model or precision, use its exact artifact's file list and inspect the local files rather than carrying over these estimates.
+For planning, the LFM3-1.7B QAD-Q4_0 weights use about **1.05 GB**; the optional d1-2B Transformers snapshot uses about **3.84 GB**. For another model or precision, use its exact artifact's file list and inspect the local files rather than carrying over these estimates.
 
 Budget for the full set of matching weights, model code, tokenizer, prompt template, and any modality assets (such as vision projectors or audio tokenizer/vocoder files). Also allow for environments, recovery wheels, runtime archives, UI assets, sample data, and extra copies made during local imports. Stage only what the app needs.
 
@@ -36,7 +36,8 @@ For an offline Python reinstall, stage wheels for the app's requirements and try
 
 ### Models
 
-- [ ] Every generator model used by the app is registered in the local cache.
+- [ ] Every generator model used by the app is registered in the local cache on board storage.
+- [ ] USB-sourced files have been copied and checked against source sizes/checksums; no runtime path/symlink points back to removable media. After approved safe ejection, startup works without the model drive attached. A storage dongle is not a USB-C network/control link.
 - [ ] Its matching tokenizer, prompt template, projector, and any other required modality assets are present.
 - [ ] If using d1, the full pinned snapshot is at `~/models/d1-2B`; its `REVISION` matches `10e7671d44e4`.
 - [ ] Model code has been reviewed before `trust_remote_code=True` is used.

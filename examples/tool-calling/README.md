@@ -61,29 +61,16 @@ GenieX handles the tool-call format. You send the standard OpenAI `tools` array 
 | Policy         | `check_policy()`                 | Write tools need a rule that passes in code. Read-only tools always pass.                                                                                                                                                            |
 | Run and log    | `run_tool()`, `run()`            | Results go back as `role: tool` messages. The final summary lists the actions that ran, taken from the code's own record.                                                                                                            |
 
-## Historical LFM2-1.2B-Tool measurements
+## What to plan for
 
-These v0.8.0 results justify the guards but are not LFM3 measurements. Re-run the same 15 cases before the demo.
+Small models make predictable tool-calling mistakes. They are why the code has the validator, the policy, and the summary:
 
-|                                                            | Result                                                                                                                                                                                            |
-| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Latency per model turn                                     | median 0.88 s, max 2.0 s                                                                                                                                                                          |
-| Final answer after tool results                            | about 25–50 tokens, 0.6–1.1 s                                                                                                                                                                     |
-| "How hot is the board and how busy is the CPU?"            | 5 of 5 called `read_thermal`; 4 of 5 also called `read_system`                                                                                                                                    |
-| "Check the temperature and log a note if it is above 70 C" | 4 of 5 called `read_thermal` with the correct arguments. Once it sent a made-up argument, and the validator refused it. The board was at 57–60 °C, and the model correctly did not try `log_note` |
-| "Is the board too hot? If so, log a note"                  | 3 of 5 called `read_thermal`. Twice it sent `log_note` in the same turn without checking. The policy refused both. Once it left out `severity`, and the validator refused that too                |
-| Zero-token retries                                         | 0                                                                                                                                                                                                 |
+* **Over-alerting.** Given a reading and a choice between alerting and doing nothing, a small model may alert on almost everything, and its alert text can make up numbers. Do not let the model decide whether a write action runs. Use a rule, or the d1 gate after you calibrate it.
+* **Claiming actions it never took.** The final answer can say "an alert has been logged" with no `log_note` call. Report actions from the code's own record; never take the model's word for them.
+* **Bad arguments.** Calls can add made-up arguments or leave required ones out. Validate every call.
+* **Skipping the check.** The model can call a write tool in the same turn as the read it depends on, or skip the tool and answer directly. The code runs multiple calls in order, so a `log_note` after `read_thermal` is checked against the new reading. Keep the prompt specific and the tool list short (3–5 tools).
 
-The model sometimes returns two tool calls in one turn. The code runs them in order, so a `log_note` placed after `read_thermal` is checked against the new reading.
-
-## What the model gets wrong (measured)
-
-Plan for these. They are why the code has the validator, the policy, and the summary:
-
-* **It over-alerts.** In a separate test, the model got a reading in the prompt and had to choose between `log_alert` and `no_op`. It chose `log_alert` on 12 of 12 readings, including 39 °C, 45 °C, and 55 °C. Its alert text sometimes made up numbers (one said 88.0 °C when the reading was 45.0 °C). Do not let the model decide whether a write action runs. Use a rule, or the d1 gate after you calibrate it.
-* **It claims actions it never took.** Without a `log_note` call, it replied "An alert has been logged" in 4 of 7 runs. Report actions from the code's own record. Never take the model's word for them.
-* **It sometimes adds arguments or leaves required ones out.** Validate every call.
-* **It sometimes skips the tool** and answers or asks a question instead (2 of 5 runs on the "too hot?" prompt). Keep the prompt specific, and keep the tool list short. Use 3–5 tools.
+Measure your own model's behavior on your prompts before the demo.
 
 ## Log format
 

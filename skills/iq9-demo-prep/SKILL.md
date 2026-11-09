@@ -3,7 +3,7 @@ name: iq9-demo-prep
 description: Prepare a LiquidAI × Dragonwing hackathon demo and pitch. Covers the judging rubric, the "why not a cloud API call?" answer, collecting measured latency, decode, memory, and endurance numbers on the IQ-9075, geniex-bench, the two-minute demo structure, and backups. Use when the user is getting ready for judging or wants performance numbers, a pitch, or a README for judges.
 compatibility: Metrics script runs on the IQ-9075 with geniex serve running.
 metadata:
-  version: "0.2"
+  version: "0.3"
 ---
 
 # Demo prep
@@ -35,25 +35,31 @@ Then tie it to the architecture: what the local rule, optional d1 gate, or other
 # Separate terminal, from the repo root:
 skills/iq9-geniex-lfm/scripts/serve.sh run
 # Another terminal (choose the app's already-cached model):
-skills/iq9-demo-prep/scripts/collect_metrics.sh --model 'cached-name:precision' --log apps/<name>/agent_log.jsonl --out apps/<name>/metrics.json
+skills/iq9-demo-prep/scripts/collect_metrics.sh --model 'cached-name:precision' --log apps/my-agent/agent_log.jsonl --out apps/my-agent/metrics.json
+# Long-answer workload: representative prompt, generous safety cap
+skills/iq9-demo-prep/scripts/collect_metrics.sh --prompt 'Explain what a transformer is in an LLM.' --max-tokens 2048 --timeout 300
 ```
 
-`collect_metrics.sh` invokes the standard-library `collect_metrics.py`. Defaults: five measured streamed requests after one separately recorded warm-up, a 128-token cap, and `enable_think: false`. Change the cap with `--max-tokens`; `--enable-think` includes reasoning. Neither choice guarantees a usable answer.
+`collect_metrics.sh` invokes the standard-library `collect_metrics.py`. Defaults: five measured streamed requests after one separately recorded warm-up, a 128-token cap, `enable_think: false`, and a 120 s per-request timeout. Change the cap with `--max-tokens`; `--enable-think` includes reasoning. Neither choice guarantees a usable answer.
+
+- **The default prompt asks for one sentence.** Those numbers describe short answers, where TTFT and prefill dominate. Pass `--prompt` with your app's real request; a unique tag is still appended to each request. The output records `prompt` and `prompt_is_default`.
+- **Long answers:** treat `--max-tokens` as a generous safety cap, not a target, and raise `--timeout` to match. Each sample records `finish_reason`, and `cap_hit_runs` counts `length` stops. Report how many runs stopped naturally (`stop`). A run that hit the cap measured the cap, not the answer.
+- **Token counts include reasoning.** With `enable_think: false`, LFM3-1.7B can still emit reasoning, so a long request can spend its whole cap on reasoning and is then scored as a failure (empty answer). Rates cover all generated tokens, not just answer text.
 
 - `ttft_s` times the first generated reasoning **or** answer delta; `answer_ttft_s` separately times the first answer delta.
 - Empty/reasoning-only answers, missing usage, cap violations, and HTTP errors are failures, excluded from successful-run medians. Report n successful **and** failed, plus the warm-up outcome.
 - `decode_tok_s` is explicitly an **SSE timing estimate**, using server completion usage and first-to-last generated delta timing. SSE chunks can bundle tokens; do not call it an exact tokenizer benchmark. Missing usage leaves rates null, never substitutes chunk counts. `generation_tok_s` includes the full request time (prefill/transport), not pure decode.
 - It records runtime/model metadata, a device-log excerpt, instantaneous server RSS, system memory/disk/thermal state, and optional app gate/loop medians, errors, alerts, and time span. Verify that the device log belongs to this server after a capped request.
 
-Do not reuse legacy or [dated reference results](../../README.md#developer-notes) as this app's fresh measurements. The collector exits 2 if any measured request fails; it never installs or pulls models.
+Report only numbers measured for this app. The collector exits 2 if any measured request fails; it never installs or pulls models.
 
 Depending on your project's goals, useful additional demo measurements include:
 - **End-to-end loop time** from the app log: `loop_ms` median and p95, not just model speed.
-- **Footprint:** model size on disk (`geniex list`), server RSS, and peak RSS of the app (`/usr/bin/time -v`, "Maximum resident set size"). Measure the chosen d1/model/configuration rather than transferring legacy memory figures. Instantaneous server RSS, peak app RSS, and NPU/device memory are distinct. d1 is optional for tiny-agent designs.
+- **Footprint:** model size on disk (`geniex list`), server RSS, and peak RSS of the app (`/usr/bin/time -v`, "Maximum resident set size"). Measure the chosen d1/model/configuration. Instantaneous server RSS, peak app RSS, and NPU/device memory are distinct. d1 is optional for tiny-agent designs.
 - **Endurance:** run for 30 minutes or more, and report the iteration count, errors, and the temperature trend.
 - **Bench, optional:** `geniex-bench` (see `docs/developer-guide.md` §10). Use the v0.10.0 bench to match the runtime, and set `LD_LIBRARY_PATH` as shown there.
 
-Write numbers into the app's README with the board, date, GenieX version, actual model/build and precision, workload, n, and medians. Label estimates as estimates and stored results as prior results. Mark anything not measured as ⚠️. Any new helper behavior must pass local checks and a bounded IQ9 integration check before being called board-verified.
+Write numbers into the app's README with the board, date, GenieX version, actual model/build and precision, workload, n, and medians. Label estimates as estimates. Any new helper behavior must pass local checks and a bounded IQ9 integration check before being called board-verified.
 
 ## 3. Two-minute demo
 

@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """Start GenieX on the NPU for LFM3-1.7B and send one capped chat request.
 
-Standard library only. The model must already be in the GenieX cache:
-    geniex pull LiquidAI/LFM3-1.7B-GGUF:Q4_0
-This script downloads nothing.
+Standard library only. The model must already be in the GenieX cache (see docs/developer-guide.md
+section 4: copy/import from the USB model drive first). This script downloads nothing.
 
     python serve_lfm_npu.py
     python serve_lfm_npu.py --prompt "Say hello in five words." --max-tokens 64
@@ -61,7 +60,7 @@ def chat(prompt: str, max_tokens: int, timeout: float) -> tuple[dict, float]:
     body = json.dumps({
         "model": MODEL,
         "messages": [{"role": "user", "content": prompt}],
-        "max_completion_tokens": max_tokens,  # retained for compatibility with the measured legacy runtimes
+        "max_completion_tokens": max_tokens,  # the chat-endpoint cap
         "compute": "npu",
         "stream": False,  # one JSON reply per call; streaming is not the cause of zero-token replies (see README)
     }).encode()
@@ -84,7 +83,8 @@ def main() -> None:
     args = ap.parse_args()
 
     if not model_cached(MODEL):
-        sys.exit(f"{MODEL} is not in the GenieX cache. Run: geniex pull {MODEL}")
+        sys.exit(f"{MODEL} is not in the GenieX cache. Stage it first: docs/developer-guide.md section 4 "
+                 "(copy/import from the USB model drive; download only with approval).")
 
     proc = None
     if server_up():

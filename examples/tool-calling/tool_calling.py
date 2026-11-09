@@ -144,7 +144,7 @@ def validate(args, schema):
 
 def check_policy(name, state):
     """Write actions are allowed only when a rule in code says so. The model's own judgement is not enough:
-    on the IQ-9075, LFM2-1.2B-Tool asked to alert on 12 of 12 readings, including 39 C (measured)."""
+    small models tend to over-alert."""
     if name in READ_ONLY:
         return None
     if name == "log_note":

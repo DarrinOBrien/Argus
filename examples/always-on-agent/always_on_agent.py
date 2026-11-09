@@ -11,7 +11,7 @@ Each iteration:
   5. log       one JSON line per iteration
 
 This reference loop uses d1; other apps may use a rule or another decision design. The loop is
-sequential: dated IQ9 LFM3/d1-2B checks support this policy (README Developer Notes).
+sequential: d1 slows down substantially while the LFM generates.
 Re-measure the chosen configuration before changing the scheduling policy.
 
 Requires: a GenieX server on --server with the --llm model cached, and the d1-2B snapshot

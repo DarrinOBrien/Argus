@@ -57,10 +57,25 @@ nodes="$(find /dev -maxdepth 1 -name 'fastrpc-cdsp*' ! -name '*-secure' 2>/dev/n
 [ "$nodes" -ge 2 ] && add ok npu-nodes "$nodes CDSP nodes (/dev/fastrpc-cdsp, -cdsp1)" \
   || add FAIL npu-nodes "$nodes CDSP nodes (expect 2)" "inspect drivers and permissions; see docs/developer-guide.md section 3.2 (ask before changes; do not install/update Adreno as a generic NPU fix)"
 
-first_node="$(find /dev -maxdepth 1 -name 'fastrpc-cdsp*' ! -name '*-secure' 2>/dev/null | sort | head -1)"
-if [ -n "$first_node" ]; then
-  if [ -r "$first_node" ]; then add ok npu-access "readable by $(id -un)"
-  else add FAIL npu-access "not readable by $(id -un)" "sudo usermod -aG fastrpc $(id -un), then log in again (ask the user first)"; fi
+# GenieX needs read AND write access; readable-only nodes still fail at runtime.
+npu_bad=""
+while IFS= read -r node; do
+  [ -n "$node" ] || continue
+  if [ ! -r "$node" ] || [ ! -w "$node" ]; then
+    npu_bad="$npu_bad ${node#/dev/}($(stat -c '%U:%G %a' "$node" 2>/dev/null || echo '?'))"
+  fi
+done < <(find /dev -maxdepth 1 -name 'fastrpc-cdsp*' ! -name '*-secure' 2>/dev/null | sort)
+if [ "$nodes" -ge 1 ]; then
+  if [ -z "$npu_bad" ]; then add ok npu-access "read/write by $(id -un)"
+  elif getent group fastrpc >/dev/null 2>&1; then
+    if case " $(id -nG) " in *" fastrpc "*) true ;; *) false ;; esac; then
+      add FAIL npu-access "not read/write by $(id -un):$npu_bad" "in fastrpc but no access: inspect udev rules/node group; see docs/developer-guide.md section 3.2"
+    else
+      add FAIL npu-access "not read/write by $(id -un):$npu_bad" "with approval: sudo usermod -aG fastrpc $(id -un), then start a new login/SSH session"
+    fi
+  else
+    add FAIL npu-access "not read/write by $(id -un):$npu_bad; no fastrpc group" "FastRPC package (qcom-fastrpc1) not installed or rules missing; see docs/developer-guide.md section 3.2 (ask first)"
+  fi
 fi
 
 free_gb="$(df -BG --output=avail / 2>/dev/null | tail -1 | tr -dc '0-9' || true)"

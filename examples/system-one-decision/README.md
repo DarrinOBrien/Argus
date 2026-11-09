@@ -4,26 +4,20 @@ Calls `LiquidAI/d1-2B` through transformers and `trust_remote_code=True`, the pa
 
 It shows the three question types: `noul` (yes/no probability), `choice` (one of named options, with probabilities), and `score` (median level on an ordered scale). It also covers an image question and a packed batch.
 
-The code path is statically tested, but d1-2B still needs an IQ-9075 run. The checked-in [`sample-output-fp32.txt`](sample-output-fp32.txt) is the historical d1-3B baseline, not an LFM3 result.
-
 This uses the model card's `system_one()` API through Transformers, run in-process on the CPU. It remains the board's decision route until GenieX decision serving is verified with d1-2B.
 
-## What is already on the board
+## Check what is already on the board
 
-Checked on the IQ-9075 (Ubuntu 24.04.4 LTS, aarch64). These were installed before this example and were not changed:
+Reuse what is installed rather than adding a second copy. On the board:
 
-| Piece        | Version           | Where                                                                                    |
-| ------------ | ----------------- | ---------------------------------------------------------------------------------------- |
-| Python       | 3.12.3            | system                                                                                   |
-| pip          | 24.0              | system                                                                                   |
-| python3-venv | 3.12.3-0ubuntu2.1 | apt, already installed                                                                   |
-| torch        | 2.11.0+cu130      | `~/.local` (user site). `torch.cuda.is_available()` is `False`, so this runs on the CPU. |
-| torchvision  | 0.26.0+cu130      | `~/.local` (user site)                                                                   |
-| pillow       | 10.2.0            | system                                                                                   |
-| numpy        | 2.4.4             | user site                                                                                |
-| GenieX CLI   | installed         | `/usr/local/bin/geniex`. Not used by this path.                                          |
+```bash
+python3 --version
+python3 -c "import venv" && echo venv-ok
+python3 -c "import torch, torchvision; print(torch.__version__, torchvision.__version__, torch.cuda.is_available())" 2>/dev/null || echo "torch/torchvision not installed"
+python3 -c "import PIL, numpy; print(PIL.__version__, numpy.__version__)" 2>/dev/null || echo "pillow/numpy not installed"
+```
 
-The torch build is tagged `+cu130`, but this board has no CUDA device, so CPU is the only path. The example runs fine on CPU.
+The IQ-9075 has no CUDA device, so `torch.cuda.is_available()` is `False` even for a `+cu` torch build; this example runs on the CPU. GenieX is not used by this path.
 
 ## What this example adds
 
@@ -71,45 +65,14 @@ python system_one_example.py --dtype bfloat16 --log decisions_bf16.jsonl   # slo
 
 Each decision is appended as one JSON line to `--log`. The alert threshold (`ALERT_THRESHOLD = 0.5`) is an example value. Tune it on states you have labeled yourself.
 
-### Historical d1-3B output
+### Notes for the CPU path
 
-```
-loaded /home/ubuntu/models/d1-3B as float32 in 3.0 s, threads=8
+* **Use fp32.** bf16 uses less memory but is several times slower on this CPU; treat it only as a memory option and measure it first.
+* **Batching does not help on the CPU.** The model card's batch speedup is for GPUs; here a batch of N states costs about N single decisions.
+* **Plan the loop around d1's latency.** A CPU decision takes seconds, not milliseconds: fine for a slow monitoring loop, too slow for a fast one. The card's millisecond latencies are for other hardware and do not apply here.
+* **The example states are plausibility checks, not validation.** A state near the threshold can flip with a small input change.
 
-== 1. sensor states
-{"obs": {"temp_c": 71.5, "temp_c_1min_ago": 58.0, "motion": "none"}, "p_alert": 0.6983, "alert_fired": true,  "category": "thermal", "severity_expected_level": 1.0,   "output_tokens": 0, "ms": 4555.9}
-{"obs": {"temp_c": 36.8, "temp_c_1min_ago": 36.6, "motion": "none"}, "p_alert": 0.0686, "alert_fired": false, "category": "normal",  "severity_expected_level": 0.264, "output_tokens": 0, "ms": 4268.9}
-{"obs": {"temp_c": 37.0, "temp_c_1min_ago": 36.9, "motion": "sudden 2.1 g spike"}, "p_alert": 0.5998, "alert_fired": true, "category": "motion", "severity_expected_level": 1.031, "output_tokens": 0, "ms": 4464.4}
-
-== 2. image (state=None)
-{"p_red_object": 0.9865, "ms": 7638.5, "input_tokens": 91}
-
-== 3. batch of 3
-batch of 3 in 13724.1 ms total
-```
-
-Read these as plausibility checks, not validation. The three states are the examples in the script. The third state sits just above the threshold, so a small change in input flips the alert.
-
-## Historical d1-3B measurements on the IQ-9075
-
-|                                                          | fp32 (default) |   bf16 |
-| -------------------------------------------------------- | -------------: | -----: |
-| Model load                                               |          3.0 s |  1.7 s |
-| One sensor decision (3 questions, one pass), median of 3 |         4.46 s | 23.9 s |
-| Image decision (`noul`, 256×256)                         |          7.6 s | 26.6 s |
-| Batch of 3 states                                        |         13.7 s | 73.2 s |
-| Peak RSS                                                 |        19.4 GB | 7.2 GB |
-| Full run, wall clock                                     |           50 s |  206 s |
-
-These numbers do not describe d1-2B. Re-run the example and record the d1-2B result before the demo.
-
-Notes from the previous stack:
-
-* **Use fp32 on this board.** bf16 is about 5× slower on this CPU, so it is kept only as a memory option.
-* **Batching does not help on CPU.** The card's batch speedup is for GPUs. Here three states cost about three times one state.
-* **Decisions are about 4.5 s each.** That is fine for a slow monitoring loop and too slow for anything faster. Plan the loop around it.
-* bf16 changes the probabilities a little (`p_alert` 0.7058 vs 0.6983 for the same state).
-* These numbers are for the CPU path. The card's latencies (26–50 ms) are for Jetson and Apple hardware and do not apply here.
+Measure load time, decision and image latency, batch time, and peak RSS for your own task before setting an interval.
 
 ## Troubleshooting
 

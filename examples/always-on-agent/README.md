@@ -12,7 +12,7 @@ observe ─→ decide (d1-2B, CPU) ─→ act (allowlist) ─→ explain (LFM3-1
 
 This is a reference d1/LFM3-1.7B design, not a requirement to use those models. d1 is optional and other LFM3-family models are welcome after verifying runtime/NPU support and task behavior. External sensors are optional and not supplied.
 
-The steps run in sequence. [Dated current-stack contention checks](../../README.md#developer-notes) support keeping d1 and the generator sequential; re-measure before changing the policy. Those checks do not verify the revised helper code or this app's current performance.
+The steps run in sequence: d1 slows down substantially while the generator runs, so keep them [one at a time](../../README.md#rules-for-the-reference-stack).
 
 ## Prerequisites
 
@@ -60,7 +60,7 @@ Ctrl-C finishes the current iteration, writes its log line, and prints a summary
 
 ### Explanations: why a raw completion
 
-LFM3-1.7B reasons by default. The agent sends a raw completion with the reasoning block already closed. [Dated reference probes](../../README.md#developer-notes) verified direct answers with unique prompts, but this does not guarantee correctness or transfer to other models:
+LFM3-1.7B reasons by default. The agent sends a raw completion with the reasoning block already closed, which gives direct answers but does not guarantee correctness or carry over to other models:
 
 ```
 <|im_start|>system ... <|im_end|>
@@ -76,7 +76,7 @@ The template uses LFM3's ChatML tokens. Record its output and latency on the boa
 
 ### Unusable replies and repeated prompts
 
-The v0.8.0 zero-token failure is historical; it was not reproduced in current reference checks, not declared fixed. Current checks did find empty/reasoning-only output with positive usage and continuing commentary on identical raw prompts.
+Replies can report tokens and still be empty or reasoning-only, and identical raw prompts can return continuing commentary.
 
 Normal explanation prompts get a unique event tag **before the first call**. Zero tokens or empty text trigger one tagged retry. Persistent failure gets `ok: false` and an error; the loop continues without automatically restarting the server. `zero_token_first_try` means actual zero usage; `empty_response_first_try` separately records an empty answer. `--stable-prompt` is diagnostics only.
 
@@ -96,32 +96,14 @@ The gate loads the pinned local snapshot with `local_files_only=True` and offlin
 
 `explanation` is `null` unless the action was `log_alert`. Each line is written and flushed before the next iteration, so the file is safe to read while the loop runs.
 
-## Historical LFM2.5/d1-3B measurements on the IQ-9075
+## Limits
 
-These v0.8.0 results are a regression baseline, not LFM3/d1-2B measurements. Re-run the same cases before the demo.
-
-| Run | What it tested | Result |
-|---|---|---|
-| A (8 iterations, simulated sensors, seed 7) | basic loop | 3 alerts, 3 explanations, all OK, 32–41 tokens. First explanation after server start took 7.1 s (includes the model load). Later explanations 1.6–2.0 s. |
-| B (14 iterations, fixed hot state, `--stable-prompt`) | identical prompts, zero-token retry | 14 of 14 explanations OK. 7 first replies had zero tokens. The tagged retry fixed all 7. |
-| C (12 iterations, fixed hot state, default timestamps) | control | 12 of 12 OK on the first try. No zero-token replies. |
-| D (heat-up: 2 min idle, 4 min generation load, then cooldown, 75 iterations, board telemetry) | Whether the board's own temperature can drive the loop | The hottest zone rose from about 57 °C to about 79 °C under load, and fell to about 64 °C after 9 minutes. The gate alerted on 53 of 75 iterations, and its `p_alert` did not follow temperature (r = −0.08). Explanations were fluent, but one said a falling temperature had risen. Gate time rose from 4.6 s to 8.6 s under load. |
-| E (gate on board-style states, two key formats, flat and rising) | Whether d1 responds to temperature | Neither key format gives a steady response. With the calibration-style keys, a flat 40 °C scored 0.62 and flat 50 to 70 °C scored 0.06–0.17. With board keys (`soc_temp_c`), every state scored 0.44–0.94. |
-| Offline env (`HF_HUB_OFFLINE=1`, `TRANSFORMERS_OFFLINE=1`) | no Hub access needed | 2 iterations ran. This is not a network-off test. |
-
-Timing: the gate takes about 4.1 s per iteration. An iteration with an explanation takes about 5–6 s warm. The loop in run C had a median gate time of 4.1 s.
-
-## Limits and interpretation
-
-The temperature failures and direction mistakes below are **historical d1-3B/LFM2.5 observations**, not measured d1-2B/LFM3 accuracy claims. Current synthetic d1-2B checks still support calibrating on real app labels and evaluating held-out states; do not deploy the synthetic fitted threshold.
-
-- **The historical gate did not track board temperature.** On the board's own readings (run D and table E above), the d1 gate alerted on most states and did not follow temperature. Its calibration does not carry over to these readings. Do not use the default threshold on board data. Calibrate on labeled board data first, or use a rule for the thermal alarm.
-- **Explanations can state the wrong direction.** In run D, the LFM described a falling temperature as having risen. The prompt gives the values but not the direction. Pass the change and its sign explicitly.
-- **The threshold is untuned.** `--threshold 0.5` is an example value. The gate fired on 3 of 8 simulated states, and a 39 °C reading got `p_alert` 0.51 in run A.
-- **Explanations describe the gate's decision. They don't check it.** If the gate is wrong, the explanation repeats the error. Run A's explanation called 39 °C "high".
-- **Unique prompts are still needed.** The revised prompt uses request tags instead of a `Time:` line. Tags do not guarantee answer correctness; do not remove uniqueness for normal runs.
+- **Calibrate before trusting alerts.** `--threshold 0.5` is an example value, not a tuned one. Calibrate on labeled data from your own signal, or use a rule; for a thermal alarm on board temperature readings, a rule is usually the safer choice.
+- **Pass the direction of change explicitly.** If the prompt gives values but not the trend, the LFM can describe a falling reading as rising. Include the change and its sign.
+- **Explanations describe the gate's decision. They don't check it.** If the gate is wrong, the explanation repeats the error.
+- **Keep prompts unique.** The prompt uses request tags; do not remove them for normal runs. Tags do not guarantee answer correctness.
 - **Restart is not automatic.** If a reply is still empty after the retry, restart `geniex serve` by hand.
-- **Not tested with the network off.** Use [`docs/offline-readiness.md`](../../docs/offline-readiness.md) for the rehearsal.
+- **Offline settings are not a network-off test.** Use [`docs/offline-readiness.md`](../../docs/offline-readiness.md) for the rehearsal.
 
 ## Troubleshooting
 
@@ -131,4 +113,4 @@ The temperature failures and direction mistakes below are **historical d1-3B/LFM
 | `d1 snapshot not found` | Inspect existing local snapshots and ask before `fetch_d1.py`; see [`examples/system-one-decision`](../system-one-decision/README.md). |
 | `ok: false` in the log | Read the error and first-try flags. They do not establish what happened on the retry. Safely relaunch only the owned server if persistent failure warrants it. |
 | `error` set on an explanation | Read the message. Timeouts and HTTP errors are logged and the loop continues. |
-| First alert or post-idle request is slower | Model loading/idle unloading may contribute. Default keepalive is 300 s; measure the selected model's reload penalty rather than transferring the legacy five-second figure. |
+| First alert or post-idle request is slower | Model loading/idle unloading may contribute. Default keepalive is 300 s; measure the selected model's reload time. |

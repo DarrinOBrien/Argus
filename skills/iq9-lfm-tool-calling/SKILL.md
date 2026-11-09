@@ -1,14 +1,14 @@
 ---
 name: iq9-lfm-tool-calling
 description: Add tool and function calling to an app on the IQ-9075 with LiquidAI LFM3-1.7B through GenieX's OpenAI-compatible tools API, with schema validation, an allowlist, and a policy check in code before any write action. Use when the user wants the model to call functions, use tools, drive hardware, or run a multi-step agent loop, or asks about tool_calls on GenieX.
-compatibility: Targets IQ-9075, geniex serve v0.10.0, LiquidAI/LFM3-1.7B-GGUF:Q4_0 in the cache. Tool parsing and rates are not yet measured on the board.
+compatibility: Targets IQ-9075, geniex serve v0.10.0, LiquidAI/LFM3-1.7B-GGUF:Q4_0 in the cache.
 metadata:
   version: "0.2"
 ---
 
 # Tool calling with LFM3-1.7B
 
-The reference is `examples/tool-calling/tool_calling.py`; its README's model-behavior figures are **historical LFM2-1.2B-Tool/v0.8.0**, not LFM3 results. Current LFM3 native tool parsing/selection still needs integration tests. LFM3-1.7B is a reference default; other cached models may be used after verifying their template, runtime, NPU support, and tool behavior. Copy its structure: `TOOLS`, `validate()`, `check_policy()`, `run_tool()`, and `run()`. `python3 tool_calling.py --self-test` checks the guards without a server.
+The reference is `examples/tool-calling/tool_calling.py`; its README lists the mistakes to plan for. Test LFM3 tool parsing and selection on the board with your own prompts. LFM3-1.7B is a reference default; other cached models may be used after verifying their template, runtime, NPU support, and tool behavior. Copy its structure: `TOOLS`, `validate()`, `check_policy()`, `run_tool()`, and `run()`. `python3 tool_calling.py --self-test` checks the guards without a server.
 
 ## How the API works
 
@@ -20,14 +20,14 @@ The reference is `examples/tool-calling/tool_calling.py`; its README's model-beh
 - `response_error()` rejects zero usage, empty/reasoning-only answers even with positive usage, and malformed tool envelopes. Valid tool calls do not need accompanying text. Argument JSON, schemas, allowlists, and policy are checked separately by `run_tool()`.
 - HTTP/response failures are flushed to JSONL; no action executes from an unusable turn. Report actions from the code's executed list, never model prose.
 
-## What the previous tool model got wrong (keep these guards)
+## What small tool models get wrong (keep these guards)
 
 | Behaviour | Guard |
 |---|---|
-| It alerted on 12 of 12 readings, 39 °C included, and its alert text invented numbers | The **policy runs in code**: a write tool needs a fresh measurement and a rule that passes. The model only proposes actions |
-| It said "alert logged" without making the call (4 of 7 runs) | Report actions from your own executed list. Never from the model's text |
-| It made up arguments, or left out required ones | `validate()` against a JSON schema with `additionalProperties: false` and `enum` |
-| It skipped the tool and asked a question instead (2 of 5 on vague prompts) | Specific prompts, and 3–5 tools at most |
+| It alerts on almost every reading, and its alert text can invent numbers | The **policy runs in code**: a write tool needs a fresh measurement and a rule that passes. The model only proposes actions |
+| It says "alert logged" without making the call | Report actions from your own executed list. Never from the model's text |
+| It makes up arguments, or leaves out required ones | `validate()` against a JSON schema with `additionalProperties: false` and `enum` |
+| It skips the tool and asks a question instead, especially on vague prompts | Specific prompts, and 3–5 tools at most |
 | It called a write tool before reading the state | The policy refuses it, and the refusal goes back as the tool result so the model can correct itself |
 
 ## Adding a tool

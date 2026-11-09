@@ -1,14 +1,15 @@
 # AGENTS.md
 
-Instructions for coding agents helping teams at the **On-Device AI Hackathon: Cleared for Takeoff ✈️** (LiquidAI × Qualcomm Dragonwing).
+Instructions for coding agents helping teams at the **On-Device AI Hackathon: Cleared for Takeoff** (LiquidAI × Qualcomm Dragonwing).
 
 ## Project and constraints
 
-Docs and examples for the **Dragonwing IQ-9075 EVK**, Ubuntu 24.04 aarch64. Start with the [developer guide](docs/developer-guide.md); consult [Developer Notes](README.md#developer-notes) for reference-stack evidence and setup warnings.
+Docs and examples for the **Dragonwing IQ-9075 EVK**, Ubuntu 24.04 aarch64. Start with the [developer guide](docs/developer-guide.md); consult [Developer Notes](README.md#developer-notes) for setup warnings and reference-stack rules.
 
 - **Reference generator:** `LiquidAI/LFM3-1.7B-GGUF:Q4_0`, GenieX **v0.10.0**, NPU, `127.0.0.1:18181`.
 - **Optional decision gate:** `LiquidAI/d1-2B`, Transformers on the CPU, local snapshot at `~/models/d1-2B`.
 - These are defaults, not eligibility restrictions. Any LFM3-family model is welcome; other LFM models are options. Verify the chosen model's format, runtime, NPU support, and task behavior. A rule can replace d1.
+- **Model media:** teams receive USB drives with model assets and have been asked to bring USB-C dongles/adapters. Ask whether the participant has the supplied drive and a suitable adapter before proposing model downloads. **Copy/import models onto board storage; never move them or delete/modify the source drive.** See [USB model staging](docs/developer-guide.md#usb-model-drive-copy-never-move).
 - External sensors are optional and not supplied. Use brought sensors, board readings, local files, or simulated inputs.
 - **Final demos run without external network access.** An isolated USB-C link may carry SSH and a board-hosted web UI, without laptop internet sharing/forwarding. Keep UI assets local and inference on the board; see [offline access](docs/offline-readiness.md#display-and-usb-c-access).
 
@@ -16,15 +17,18 @@ Docs and examples for the **Dragonwing IQ-9075 EVK**, Ubuntu 24.04 aarch64. Star
 
 ## Before board work
 
-- Run board commands on the board (`aarch64`, GenieX on PATH) or over the user-supplied SSH host (`$IQ9_HOST`). Never assume laptop runtime/NPU access or guess a host.
-- Read the [preflight skill](skills/iq9-preflight/SKILL.md) and run the app's matching profile before board work. Example SSH invocation from the repo root:
+- For "get started", board access, internet setup, or an unknown installed stack, read the [getting-started skill](skills/iq9-getting-started/SKILL.md) first. Establish access → inspect board/connectivity → propose setup → approved changes → verify the generator. Help with UART/manual steps if SSH is not yet available; do not guess a host or require GenieX before initial checks.
+- Run board commands on the board (`aarch64`, Ubuntu 24.04), through its UART console, or over the user-confirmed SSH host (`$IQ9_HOST`). Never assume laptop runtime/NPU access. Laptop serial-tool commands and board-shell commands are different; label where each runs.
+- Event boards use the organizer-provided `ubuntu` / `liquidxqualcomm` login for UART and SSH, not the upstream first-login password. See [access and setup networking](docs/developer-guide.md#0-board-access-and-internet-for-setup). Have the user enter passwords interactively; do not log private Wi-Fi credentials or disable SSH host-key verification.
+- Establish a usable control session before expecting preflight to run. Once access is available, read the [preflight skill](skills/iq9-preflight/SKILL.md); start with `--profile board` for an unknown stack, then use the app's matching profile after setup. Example from the laptop's repo root, without requiring a board-side repo copy:
 
   ```bash
-  ssh "$IQ9_HOST" 'bash -s -- --json' < skills/iq9-preflight/scripts/preflight.sh
+  ssh "$IQ9_HOST" 'bash -s -- --profile board --json' < skills/iq9-preflight/scripts/preflight.sh
   ```
 
-- For laptop-only documentation work without a host, report board preflight as unperformed.
-- Before downloads/imports, inspect `geniex list`, local weights, and `df -h /`. Missing cache registration does not prove weights absent. Never re-pull cached models.
+- For laptop-only documentation work or inaccessible boards, report board preflight as unperformed; do not run it on the laptop as a substitute.
+- Internet may be used during approved setup/staging. Check connectivity from the board; preflight's informational probe is not an online-readiness test. Preserve the active control path before network changes. The final demo must still run without external network access.
+- Before downloads/imports, inspect `geniex list` if available, local weights, the participant-confirmed USB model drive, and `df -h /`. If GenieX is missing, inspect local files/disk first and its cache after approved installation. Missing cache registration does not prove weights absent. Never re-pull cached models.
 
 ## Non-negotiable rules
 
@@ -38,7 +42,7 @@ Docs and examples for the **Dragonwing IQ-9075 EVK**, Ubuntu 24.04 aarch64. Star
 
 5. **Verify generator NPU execution:** send a capped request and inspect the current server's device/offload log for `HTP0`. Missing output needs diagnosis, not an assumed CPU fallback. Do not silently switch compute routes.
 
-6. **Get approval before changes:** system/runtime installation or upgrades; model downloads/imports/removal (`geniex pull/remove/clean`, `fetch_d1.py`); changing the d1 revision pin or user configuration; deleting user files; non-loopback server binding; or network cuts. Review snapshot code before enabling `trust_remote_code`.
+6. **Get approval before changes:** system/runtime installation or upgrades; model copies/downloads/imports/removal (`geniex pull/remove/clean`, `fetch_d1.py`); changing the d1 revision pin or user configuration (including network, account, and SSH settings); deleting user files; non-loopback server binding; or network cuts. This includes laptop serial-tool/driver installation. Review snapshot code before enabling `trust_remote_code`.
 
 7. **Protect shared boards:** inspect resolved paths and symlinks before deletion, back up replaced board files, and preserve unrelated files. Do not interrupt shared servers without permission. Before a network cut, establish a tested local console or isolated USB-C control link and restoration plan.
 
@@ -48,6 +52,7 @@ Read the corresponding `SKILL.md` **before doing that work**. Skills supply proc
 
 | Skill | Use it for |
 |---|---|
+| [iq9-getting-started](skills/iq9-getting-started/SKILL.md) | Guided onboarding: UART, setup internet, SSH, approved setup, first NPU response |
 | [iq9-preflight](skills/iq9-preflight/SKILL.md) | Board readiness and diagnosis |
 | [iq9-geniex-lfm](skills/iq9-geniex-lfm/SKILL.md) | LFM requests, `lfm_client.py`, server lifecycle, output guards |
 | [iq9-d1-decision-gate](skills/iq9-d1-decision-gate/SKILL.md) | d1 loading, typed questions, calibration |
@@ -65,4 +70,4 @@ Flashing, camera pipelines, and model conversion/quantisation are outside this r
 - Each app README covers launch, measurements, and offline status. Report board, runtime, model/precision, sample count, and medians; follow the demo skill's metric definitions.
 - **Check what you change.** For documentation, check links and command examples. For runnable examples, use a short smoke run when practical. No blanket test-suite or board-run requirement.
 - **Be clear about verification.** Only claim board or offline verification when performed; state what remains unverified.
-- Use version-matched Developer Notes; never transfer results between models, precisions, runtimes, or boards. Label prior results as prior; distinguish **✅ confirmed**, **🧪 measured**, and **⚠️ unverified**.
+- Report only numbers measured for the team's own app, model, and runtime; never quote numbers from docs as measurements. No emoji markers.

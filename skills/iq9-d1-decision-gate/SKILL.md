@@ -1,9 +1,9 @@
 ---
 name: iq9-d1-decision-gate
 description: Use LiquidAI d1-2B as a calibrated decision gate on the IQ-9075. Covers writing typed questions, running system_one() through Transformers on the CPU, threshold calibration on labeled data, and when to use a plain rule instead. Use when an app has to triage, classify, route, gate an action, or decide whether to alert, or whenever d1, system_one, or /v1/systemone comes up.
-compatibility: IQ-9075 with the ~/.venvs/d1 venv (transformers>=5.19, CPU torch) and the pinned ~/models/d1-2B snapshot. Reference Transformers CPU checks are dated; other tasks, precisions, and memory budgets need fresh board measurement. See examples/system-one-decision.
+compatibility: IQ-9075 with the ~/.venvs/d1 venv (transformers>=5.19, CPU torch) and the pinned ~/models/d1-2B snapshot. Measure each task's latency and memory on the board. See examples/system-one-decision.
 metadata:
-  version: "0.2"
+  version: "0.3"
 ---
 
 # d1-2B decision gate
@@ -14,18 +14,20 @@ d1-2B takes a state (text, JSON, images) and named questions. It returns calibra
 
 1. **Run d1-2B through Transformers on the CPU:** `AutoModel.from_pretrained(<local dir>, trust_remote_code=True, local_files_only=True, dtype=torch.float32)` on CPU. Set offline Transformers/Hub settings before imports. The tested GenieX d1-2B GGUF requests failed; do not substitute that route.
 2. **Load from `~/models/d1-2B`, never from a repo ID.** A repo ID downloads, and that fails offline. The snapshot is pinned to `10e7671d44e4` (`fetch_d1.py`). Before moving the pin, review the remote code again and ask the user.
-3. **Start with fp32.** Measure fp32 and bf16 on the board before choosing; the old d1-3B numbers do not transfer.
+3. **Start with fp32.** bf16 saves memory but is much slower on this CPU; measure both before choosing it.
 4. **Load once, reuse.** Never load per request.
 5. **Keep it sequential with the LFM.** Current reference measurements support this policy; re-measure the chosen configuration before changing it.
 6. **d1 gates, the allowlist decides.** Only allowlisted actions run, whatever the probability says.
 
+## Stage only if the app uses d1
+
+Inspect `~/models/d1-2B` first. If the pinned snapshot is missing, **ask whether the participant has the supplied USB model drive and USB-C dongle/adapter** before proposing `fetch_d1.py`. With approval, **copy the full pinned Transformers snapshot—not a GGUF, and never move/delete the USB source—to `~/models/d1-2B`**. Follow [USB model staging](../../docs/developer-guide.md#usb-model-drive-copy-never-move): inspect paths/symlinks, preserve existing board files, copy all weights/config/tokenizer/model-code assets and `REVISION`, and verify sizes/checksums. Resolve any bundled cache symlinks into local files rather than leaving links to removable media. Confirm the full pin `10e7671d44e4b37700020b1eed3f594c5f2af0b4` and review the copied model code before enabling trust. A drive containing another revision does not authorize changing the pin. Run long copy jobs in a separate terminal; download only if compatible local/USB assets are unavailable and separately approved.
+
 ## Budget
 
-🧪 Prior checks, 2026-11-05: IQ-9075, d1-2B fp32 CPU / 8 threads, Transformers 5.19.0 / torch 2.11.0, with LFM3-1.7B QAD-Q4_0 on HTP0 through GenieX v0.10.0. Typed answers, image smoke test, and three-state batch passed. The same three-question gate had median **2.848 s alone** versus **5.572 s during generation**, **n=5 per condition**, paired.
+Run d1-2B fp32 through Transformers on the CPU, and keep it sequential with the LFM: it slows down substantially during generation. With GenieX v0.10.0, `/v1/decisions` for a d1-2B GGUF returns HTTP 400 `SDKError(Parameter not supported by this plugin)` and `/v1/systemone` returns 404, so do not route d1 through GenieX.
 
-All five tested d1-2B Q4_K_M GGUF CPU `/v1/decisions` requests returned HTTP 400, `SDKError(Parameter not supported by this plugin)` (`-100016`); `/v1/systemone` returned 404. This is configuration-specific, not universal lack of GenieX decision support.
-
-Measure the actual task's text/image latency, batch behavior, peak RSS, and loop time before setting an interval. fp32/bf16 memory or performance does not transfer from d1-3B. For fast loops, put a cheap rule first and call d1 only on candidates.
+Measure the actual task's text/image latency, batch behavior, peak RSS, and loop time before setting an interval. For fast loops, put a cheap rule first and call d1 only on candidates.
 
 ## Writing questions
 
@@ -57,7 +59,7 @@ State design matters more than wording:
 
 ## Calibrate. Don't copy 0.5
 
-The previous d1-3B gate did **not** track the board's thermal readings. Do not transfer its threshold to d1-2B. Calibrate:
+A gate can fail to track raw board readings such as temperature. Do not copy a threshold from another model or task. Calibrate:
 
 1. Log states while the app runs, with their `p_alert` (the always-on agent's log has `decision.p_alert`).
 2. Label task-representative states by hand (`"label": true/false`). Aim for at least 30 calibration states and 10 per class as an initial sample, not proof of deployment readiness. Reserve separate held-out states (prefer separate time periods/events); do not fit and evaluate on the same rows.

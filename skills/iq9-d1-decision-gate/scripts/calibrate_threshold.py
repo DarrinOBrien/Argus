@@ -14,8 +14,7 @@ Input: JSONL. Each line has a label and either a stored probability or a state t
     python calibrate_threshold.py --self-test
 
 Output: a threshold sweep, the chosen threshold, and its confusion matrix. Also warns when d1 does not separate
-the classes (AUC near 0.5). The previous d1-3B gate did not track the board's thermal readings; calibrate
-d1-2B afresh, then use a rule instead or rewrite the state and questions if it still does not separate them.
+the classes (AUC near 0.5). If that happens, rewrite the state and questions, or use a rule instead.
 """
 
 import argparse
