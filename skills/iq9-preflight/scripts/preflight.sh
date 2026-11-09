@@ -49,9 +49,13 @@ add() {  # status name detail fix
 arch="$(uname -m)"
 [ "$arch" = aarch64 ] && add ok arch "$arch" || add FAIL arch "$arch" "run this on the IQ-9075"
 
+# Informational for every profile: this is not a display test or affected-version detection.
+add WARN display "external monitor compatibility not checked; organizer-reported Adreno APT update issue; SSH unaffected" \
+  "for monitor setups, confirm the affected update and approved removal/rollback with organizers and owner; upstream installer is not event-adapted (docs/developer-guide.md section 3.2)"
+
 nodes="$(find /dev -maxdepth 1 -name 'fastrpc-cdsp*' ! -name '*-secure' 2>/dev/null | wc -l | tr -d ' ')"
 [ "$nodes" -ge 2 ] && add ok npu-nodes "$nodes CDSP nodes (/dev/fastrpc-cdsp, -cdsp1)" \
-  || add FAIL npu-nodes "$nodes CDSP nodes (expect 2)" "sudo apt-get install -y qcom-adreno1 qcom-fastrpc1 libqnn1 (ask the user first)"
+  || add FAIL npu-nodes "$nodes CDSP nodes (expect 2)" "inspect drivers and permissions; see docs/developer-guide.md section 3.2 (ask before changes; do not install/update Adreno as a generic NPU fix)"
 
 first_node="$(find /dev -maxdepth 1 -name 'fastrpc-cdsp*' ! -name '*-secure' 2>/dev/null | sort | head -1)"
 if [ -n "$first_node" ]; then

@@ -2,6 +2,17 @@
 
 Use this rubric to plan the project and its demo. If the organizers' brief differs, follow the brief.
 
+## How to submit
+
+Submit your project between **8:00–8:30 p.m.** by completing the [event submission form](https://submissions.loggia.sh/events/cleared-for-takeoff).
+
+Your submission must include **both**:
+
+- A link to your project's **GitHub repository**.
+- A link to your **Arduino Project Hub submission**.
+
+Have both links ready before the submission window opens.
+
 ## Scoring
 
 | Weight | Criterion | What judges look for |
@@ -19,17 +30,10 @@ Every finalist gets this question: **"Why should this not simply be a cloud API 
 
 Prepare an answer that names a specific constraint. Examples: the network is unavailable, the data is sensitive, the reaction must happen in under a second, or the marginal cost has to stay flat at scale. Being on-device is not an answer by itself.
 
-## Bonus awards
-
-- **Fastest Agent** — speed of the end-to-end loop
-- **Best Tiny Agent** — the best result for the smallest footprint
-
-Include the app's timing and footprint in the demo. See [`runtimes.md`](runtimes.md) for `geniex-bench` and [`developer-guide.md` §10](developer-guide.md#10-measuring-performance).
-
 ## Demo format
 
 - Two minutes per team, plus one judge question.
-- The network is removed for the final demo. The core workflow must keep running offline.
+- External network access is removed for the final demo. The core workflow must keep running offline. An isolated USB-C link for SSH and a board-hosted app web UI is allowed, with no laptop internet sharing/forwarding; see [display and USB-C access](offline-readiness.md#display-and-usb-c-access).
 - Show local inputs, decisions, executed actions, and errors from the app's log.
 - Prepare a visible timer, local sample data, and a backup recording.
 
@@ -42,7 +46,9 @@ Include the app's timing and footprint in the demo. See [`runtimes.md`](runtimes
 | Peak process memory | `/usr/bin/time -v`; track system/device memory separately | Footprint |
 | Decision-gate latency | Time the app's actual rule or optional d1 questions on the board | Fits the observation interval |
 | End-to-end loop time | Timing in the app's flushed JSONL | Includes decision, action, and explanation work |
-| Network-off run | Disconnect all uplinks and demonstrate the core workflow | Offline operation |
+| Network-off run | Disconnect all external uplinks and demonstrate the core workflow; any USB-C control/UI link must remain isolated | Offline operation |
 | Decision log | Local timestamps, decisions, executed actions, and errors | Explains what the app did |
+
+For timing and footprint guidance, see [`runtimes.md`](runtimes.md) for `geniex-bench` and [`developer-guide.md` §10](developer-guide.md#10-measuring-performance).
 
 Use the app's own workload and selected model/precision when collecting numbers. Keep the shared documentation as a reference; put project-specific results in the app's README.

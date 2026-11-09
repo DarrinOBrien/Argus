@@ -13,7 +13,7 @@ Reference documentation for the hackathon: build on-device AI agents with **Liqu
 * **Reference generator:** This repo's examples use `LiquidAI/LFM3-1.7B-GGUF` (Q4_0) via GenieX v0.10.0—a starting point, not a required model.
 * **Optional decision layer:** `LiquidAI/d1-2B`, a decision model that answers typed questions in one pass with no output tokens.
 
-Other LFM models are also options. Browse [LiquidAI's published models on Hugging Face](https://huggingface.co/LiquidAI) and each model's card and file list rather than treating this repo's examples as a model catalog. The example READMEs explain their reference choices.
+Start with [LiquidAI's LFM3 family on Hugging Face](https://huggingface.co/collections/LiquidAI/lfm3), then review each model's card and file list. Other LFM models are also options. The example READMEs explain their reference choices.
 
 For any model you choose, verify [format, precision, runtime, and NPU compatibility](docs/runtimes.md#model-format-and-precision), [stage its required assets before the network cut](docs/offline-readiness.md#disk-first), and test it on the board offline before a demo. Reference-stack results do not verify another model or precision.
 
@@ -47,12 +47,12 @@ Judging weights and the "why not just a cloud API call?" question are in [`docs/
 | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `README.md`                     | This file: goals, objectives, repo map                                                                                                                                         |
 | `docs/developer-guide.md`       | Main guide: setup → first model → server → decision and generation loop → offline                                                                                              |
-| `docs/decision-models.md`       | d1-2B: question types and Path A on the IQ-9075                                                                                                                                |
+| `docs/decision-models.md`       | d1-2B: question types and Transformers on the IQ-9075 CPU                                                                                                                                |
 | `docs/runtimes.md`              | GenieX versions, CLI, server endpoints and request fields, benchmarking, pitfalls                                                                                              |
 | `docs/hardware.md`              | IQ-9075 facts, team board state, driver packages                                                                                                                               |
 | `docs/offline-readiness.md`     | Pre-cut checklist and network-off rehearsal                                                                                                                                    |
 | `docs/judging.md`               | Scoring rubric, demo format, metrics to show                                                                                                                                   |
-| `examples/system-one-decision/` | Path A: `system_one()` with transformers. Installation, pinned fetch, environment check, example.                                                                              |
+| `examples/system-one-decision/` | `system_one()` with Transformers on the CPU. Installation, pinned fetch, environment check, example.                                                                              |
 | `examples/lfm-server-npu/`      | LFM3-1.7B: start `geniex serve` on the NPU, send one capped chat request, stop it                                                                                              |
 | `examples/always-on-agent/`     | The always-on loop, runnable: observe, decide (d1), act through an allowlist, explain alerts (LFM, raw completion), log to JSONL                                               |
 | `examples/tool-calling/`        | LFM3-1.7B: native `tools` calls, schema validation, allowlist, and a policy check before any write action                                                                      |
@@ -65,9 +65,19 @@ Judging weights and the "why not just a cloud API call?" question are in [`docs/
 
 ## Developer Notes
 
+### External monitors and headless setups
+
+**Organizer-reported setup issue:** the current Adreno APT update causes a GPU-driver issue when using an external monitor on the IQ-9075. Teams using a monitor must **remove/roll back the Adreno APT update** before using that setup. This repo's setup recipes no longer recommend installing/updating `qcom-adreno1`. Check installed versions and confirm the removal/rollback procedure with the organizers and board owner before changing drivers; the affected/fixed package versions are not recorded here.
+
+**SSH is not affected by this monitor issue.** A headless setup using SSH and an app web server over a configured **USB-C network link** is allowed during the network-off demo. Keep the link local-only: disable internet sharing/forwarding on the laptop and remove all external uplinks. Serve UI assets locally and keep inference on the board. See [display and USB-C access](docs/offline-readiness.md#display-and-usb-c-access) for the checklist and SSH port forwarding.
+
+This setup warning is separate from the dated model/runtime checks below; those checks did not verify monitor recovery or a USB-C network-off demo.
+
+### Reference-stack checks — 2026-11-05
+
 🧪 Checked on an IQ-9075 on **2026-11-05**, with **GenieX v0.10.0**, **LFM3-1.7B Q4_0 on HTP0**, and **d1-2B fp32 on the CPU (8 threads)**. These observations apply to the tested configuration, not every LFM3-family model; re-test your chosen model and runtime.
 
-* **Use Path A for d1-2B.** Transformers passed the typed-answer, image, and batch checks. GenieX `/v1/decisions` requests with d1-2B **Q4_K_M GGUF on CPU** returned an unsupported-parameter error in all five attempts; `/v1/systemone` returned 404. Keep the decision layer on Transformers for this stack.
+* **If using d1-2B, run it through Transformers on the CPU.** Transformers passed the typed-answer, image, and batch checks. GenieX `/v1/decisions` requests with d1-2B **Q4_K_M GGUF on CPU** returned an unsupported-parameter error in all five attempts; `/v1/systemone` returned 404. Keep the decision layer on Transformers for this stack.
 * **Cap every request and validate the answer.** Use `max_completion_tokens` on chat and `max_tokens` on raw completions. Caps were honored and no zero-token replies occurred in 205 recorded LFM requests; retain the retry as a defensive fallback. **Positive token usage can still accompany empty answer content.** For text-answer requests, treat empty `content` as a failure; for tool requests, validate `tool_calls` instead.
 * **LFM3-1.7B reasons by default.** For direct answers, try `enable_think: false` on chat or a raw completion with the reasoning block closed. Both helped in the one-sentence probes, but the chat flag did not guarantee a usable answer in a tight-cap test. Check `content` and `reasoning_content` before the demo.
 * **Avoid identical raw-completion prompts.** Repeated identical `/v1/completions` requests returned continuing commentary instead of fresh direct answers, despite nonzero token counts. Include a unique event timestamp or tag in each prompt and validate the output; cache/state handling is only a suspected cause.

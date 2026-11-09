@@ -3,7 +3,7 @@
 
 Each iteration:
   1. observe   read the board's own telemetry (SoC thermal zones, CPU load) by default
-  2. decide    d1-2B gate (Path A: transformers, CPU, fp32) returns p_alert, category, severity
+  2. decide    d1-2B gate (Transformers, CPU, fp32) returns p_alert, category, severity
   3. act       choose an action; only allowlisted actions run, anything else is refused
   4. explain   only when the action is log_alert: LFM3-1.7B (GenieX, NPU) writes one sentence.
                Uses a raw completion with the reasoning block closed, because the chat path

@@ -1,6 +1,6 @@
 # Runtimes and Tooling - GenieX on the IQ-9075
 
-The reference generator uses **GenieX CLI v0.10.0** with a cached LFM GGUF. The optional d1-2B gate uses **Transformers on the CPU (Path A)** and does not call the GenieX server.
+The reference generator uses **GenieX CLI v0.10.0** with a cached LFM GGUF. The optional d1-2B gate uses **Transformers on the CPU** and does not call the GenieX server.
 
 Use `geniex version` and `geniex --help` to inspect the installed runtime. Do not reinstall or change versions unnecessarily, especially between rehearsal and the demo.
 
@@ -10,7 +10,7 @@ Use `geniex version` and `geniex --help` to inspect the installed runtime. Do no
 |---|---|---|---|
 | `llama_cpp` through GenieX | GGUF and associated model assets | NPU, GPU, CPU, hybrid, depending on model support | Reference LFM generator |
 | `qairt` | Qualcomm AI Hub bundles | NPU | Alternative deployment format; conversion is outside this guide |
-| Transformers | Local safetensors snapshot and model code | CPU for d1 Path A | Optional decision gate |
+| Transformers | Local safetensors snapshot and model code | CPU for d1-2B | Optional decision gate |
 
 ## Model format and precision
 
@@ -21,7 +21,7 @@ Choose the model, input modality, file format, precision, and compute route toge
 - The helper's raw `sentence()` template targets the reference LFM3 format. Re-test templates, reasoning controls, usable answers, and tool-call behavior when changing models.
 - Record the exact artifact, revision, precision, and runtime in the app's configuration so it can be reproduced offline.
 
-The optional d1 Path A uses a pinned local Transformers snapshot, not a GGUF. See [Decision layer](decision-models.md) for loading and calibration, and [Offline readiness](offline-readiness.md#disk-first) for asset staging and disk budgeting.
+The optional d1-2B gate uses a pinned local Transformers snapshot, not a GGUF. See [Decision layer](decision-models.md) for loading and calibration, and [Offline readiness](offline-readiness.md#disk-first) for asset staging and disk budgeting.
 
 ## CLI
 

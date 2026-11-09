@@ -15,6 +15,12 @@ The hackathon uses the **Dragonwing IQ-9075 EVK.**
 
 External sensors are **optional and not provided**. Participants may bring their own camera, microphone, or other sensors. Projects can also use simulated inputs, local files/events, or the board's internal thermal readings.
 
+## Display and headless access
+
+Organizers report a GPU-driver issue with external monitors after the current Adreno APT update. If using a monitor, **remove/roll back the Adreno APT update** with the organizers' procedure and board-owner approval; do not install/update `qcom-adreno1` as a generic NPU prerequisite. See [Developer Notes](../README.md#external-monitors-and-headless-setups).
+
+SSH is not affected. A configured, isolated USB-C network link can carry SSH and a board-hosted app web UI during the network-off demo, without laptop internet sharing/forwarding. See [offline access and rehearsal](offline-readiness.md#display-and-usb-c-access).
+
 ## Requirements
 
 - Plan disk and memory for the selected models, their runtime, and the app. Weight-file size is not the same as runtime memory use.
@@ -32,7 +38,7 @@ Common setup sources:
 | Component | Reference configuration | Set up in |
 |---|---|---|
 | GenieX CLI | v0.10.0 | [Developer guide section 3.3](developer-guide.md#33-geniex-cli) |
-| NPU driver packages | `qcom-adreno1`, `qcom-fastrpc1`, `libqnn1`, plus base libraries | [Section 3.2](developer-guide.md#32-driver-packages) |
+| NPU driver packages | `qcom-fastrpc1`, `libqnn1`, plus base libraries; see Adreno monitor warning above | [Section 3.2](developer-guide.md#32-driver-packages) |
 | Python | 3.12 | [Section 3.4](developer-guide.md#34-python-environment-for-the-decision-layer) |
 | Optional d1 environment | Transformers 5.19+, torch, torchvision, Pillow | [Section 3.4](developer-guide.md#34-python-environment-for-the-decision-layer) |
 

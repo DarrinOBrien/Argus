@@ -1,7 +1,7 @@
 ---
 name: iq9-d1-decision-gate
-description: Use LiquidAI d1-2B as a calibrated decision gate on the IQ-9075. Covers writing typed questions, running system_one() through transformers on the CPU (Path A), threshold calibration on labeled data, and when to use a plain rule instead. Use when an app has to triage, classify, route, gate an action, or decide whether to alert, or whenever d1, system_one, or /v1/systemone comes up.
-compatibility: IQ-9075 with the ~/.venvs/d1 venv (transformers>=5.19, CPU torch) and the pinned ~/models/d1-2B snapshot. Reference Path A checks are dated; other tasks, precisions, and memory budgets need fresh board measurement. See examples/system-one-decision.
+description: Use LiquidAI d1-2B as a calibrated decision gate on the IQ-9075. Covers writing typed questions, running system_one() through Transformers on the CPU, threshold calibration on labeled data, and when to use a plain rule instead. Use when an app has to triage, classify, route, gate an action, or decide whether to alert, or whenever d1, system_one, or /v1/systemone comes up.
+compatibility: IQ-9075 with the ~/.venvs/d1 venv (transformers>=5.19, CPU torch) and the pinned ~/models/d1-2B snapshot. Reference Transformers CPU checks are dated; other tasks, precisions, and memory budgets need fresh board measurement. See examples/system-one-decision.
 metadata:
   version: "0.2"
 ---
@@ -12,7 +12,7 @@ d1-2B takes a state (text, JSON, images) and named questions. It returns calibra
 
 ## Hard rules
 
-1. **Use Path A when using d1-2B:** `AutoModel.from_pretrained(<local dir>, trust_remote_code=True, local_files_only=True, dtype=torch.float32)` on CPU. Set offline Transformers/Hub settings before imports. The tested GenieX d1-2B GGUF requests failed; do not substitute that route.
+1. **Run d1-2B through Transformers on the CPU:** `AutoModel.from_pretrained(<local dir>, trust_remote_code=True, local_files_only=True, dtype=torch.float32)` on CPU. Set offline Transformers/Hub settings before imports. The tested GenieX d1-2B GGUF requests failed; do not substitute that route.
 2. **Load from `~/models/d1-2B`, never from a repo ID.** A repo ID downloads, and that fails offline. The snapshot is pinned to `10e7671d44e4` (`fetch_d1.py`). Before moving the pin, review the remote code again and ask the user.
 3. **Start with fp32.** Measure fp32 and bf16 on the board before choosing; the old d1-3B numbers do not transfer.
 4. **Load once, reuse.** Never load per request.

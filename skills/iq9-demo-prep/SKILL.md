@@ -1,6 +1,6 @@
 ---
 name: iq9-demo-prep
-description: Prepare a LiquidAI × Dragonwing hackathon demo and pitch. Covers the judging rubric, the "why not a cloud API call?" answer, collecting measured latency, decode, memory, and endurance numbers on the IQ-9075, geniex-bench, the two-minute demo structure, and backups. Use when the user is getting ready for judging, wants performance numbers, a pitch, a README for judges, or is going for the Fastest Agent or Best Tiny Agent awards.
+description: Prepare a LiquidAI × Dragonwing hackathon demo and pitch. Covers the judging rubric, the "why not a cloud API call?" answer, collecting measured latency, decode, memory, and endurance numbers on the IQ-9075, geniex-bench, the two-minute demo structure, and backups. Use when the user is getting ready for judging or wants performance numbers, a pitch, or a README for judges.
 compatibility: Metrics script runs on the IQ-9075 with geniex serve running.
 metadata:
   version: "0.2"
@@ -47,7 +47,7 @@ skills/iq9-demo-prep/scripts/collect_metrics.sh --model 'cached-name:precision' 
 
 Do not reuse legacy or [dated reference results](../../README.md#developer-notes) as this app's fresh measurements. The collector exits 2 if any measured request fails; it never installs or pulls models.
 
-For the Fastest Agent or Best Tiny Agent awards, add:
+Depending on your project's goals, useful additional demo measurements include:
 - **End-to-end loop time** from the app log: `loop_ms` median and p95, not just model speed.
 - **Footprint:** model size on disk (`geniex list`), server RSS, and peak RSS of the app (`/usr/bin/time -v`, "Maximum resident set size"). Measure the chosen d1/model/configuration rather than transferring legacy memory figures. Instantaneous server RSS, peak app RSS, and NPU/device memory are distinct. d1 is optional for tiny-agent designs.
 - **Endurance:** run for 30 minutes or more, and report the iteration count, errors, and the temperature trend.
@@ -60,7 +60,7 @@ Write numbers into the app's README with the board, date, GenieX version, actual
 | Time | Show |
 |---|---|
 | 0:00–0:20 | The user, their problem, and the constraint (from step 1) |
-| 0:20–0:35 | **Unplug the network on stage**, then show `curl huggingface.co` failing |
+| 0:20–0:35 | **Disconnect external uplinks on stage**, then show an external `curl` failing; an isolated USB-C SSH/web UI link may remain, without laptop internet sharing/forwarding |
 | 0:35–1:30 | The loop running live: an input changes, the local decision runs, the action fires, the one-sentence explanation appears |
 | 1:30–1:50 | The local JSONL log scrolling (the proof) plus 2–3 numbers from `metrics.json` |
 | 1:50–2:00 | The next step for a real deployment |
@@ -71,6 +71,7 @@ Keep a visible timer, a recorded backup video, and a recorded log ready.
 
 - [ ] Preflight shows no FAIL for the app's selected profile/model (`reference`, `generator`, or `board`); the app also passes its end-to-end smoke test.
 - [ ] The `iq9-offline-rehearsal` network-off run is done, and its evidence is saved.
+- [ ] Display/control path is rehearsed: monitor setups require removing/rolling back the current Adreno APT update with approval; SSH is unaffected. For a headless USB-C SSH/web UI setup, verify the isolated link, local browser assets, and no laptop internet sharing/forwarding after the cut. See [Developer Notes](../../README.md#external-monitors-and-headless-setups) and [USB-C access](../../docs/offline-readiness.md#display-and-usb-c-access).
 - [ ] Run a visible foreground server with a keepalive covering quiet gaps (`serve.sh run` defaults to 1800 s); verify a usable capped warm-up and HTP0 before showing metrics.
 - [ ] Use unique initial raw prompts and validate answer/tool content. Know how to safely relaunch the owned foreground server; do not interrupt a shared one or silently detach it.
 - [ ] Read the licence for every model shown. LFM3-1.7B and d1-2B use the LFM Open License v1.0.

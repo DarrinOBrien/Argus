@@ -1,4 +1,4 @@
-"""Check the Path A stack before running the System One example.
+"""Check the Transformers CPU stack before running the System One example.
 
 Exit code 0 means every check passed. Run it after the install steps in README.md.
 """

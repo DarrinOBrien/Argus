@@ -30,7 +30,7 @@ A score is the median level index, starting at zero. The response envelope conta
 
 ## Running it on the IQ-9075
 
-### Path A: transformers on the CPU
+### Transformers on the CPU
 
 The reference d1 integration uses a local Transformers snapshot in fp32 on the CPU. It does not send decision requests to the GenieX server.
 
@@ -93,7 +93,7 @@ Stage the whole snapshot, not only the weights. Runtime memory is separate from 
 
 ## Calibrating thresholds
 
-Do not deploy a default threshold of 0.5 or copy one from another task.
+We suggest experimenting with thresholds on your app's own inputs to find what works for your demo. Treat 0.5 or another task's threshold as a candidate to evaluate, not a guaranteed fit. The workflow below is one way to compare options and balance false alerts against missed events.
 
 1. Collect representative app states and probabilities.
 2. Label the desired decision with JSON `true` or `false`.

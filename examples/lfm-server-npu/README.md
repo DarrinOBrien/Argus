@@ -18,11 +18,13 @@ Script: [`serve_lfm_npu.py`](serve_lfm_npu.py)
 
 ## Install GenieX
 
-Needs outbound HTTPS to `qaihub-public-assets.s3.us-west-2.amazonaws.com`, `curl` or `wget`, and the NPU driver packages:
+**External monitor warning:** organizers report a GPU-driver issue after the current Adreno APT update. Monitor setups must **remove/roll back that update** with the organizers' procedure and board-owner approval. SSH is unaffected; a headless SSH/web UI setup over an isolated USB-C link is allowed. See [Developer Notes](../../README.md#external-monitors-and-headless-setups) and [USB-C access](../../docs/offline-readiness.md#display-and-usb-c-access).
+
+Needs outbound HTTPS during setup to `qaihub-public-assets.s3.us-west-2.amazonaws.com`, `curl` or `wget`, and the NPU driver packages. Inspect the existing installation first and obtain approval before installing only missing libraries; do not install/update `qcom-adreno1` as part of this NPU setup:
 
 ```bash
 sudo apt-get install -y libatomic1 libglib2.0-0 ocl-icd-libopencl1
-sudo apt-get install -y qcom-adreno1 qcom-fastrpc1 libqnn1
+sudo apt-get install -y qcom-fastrpc1 libqnn1
 ```
 
 Install the version this example was tested on:

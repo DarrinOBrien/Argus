@@ -26,7 +26,7 @@ echo "    chipset: $(geniex config get chipset)"
 ls /dev/fastrpc-cdsp* >/dev/null 2>&1 || fail "no /dev/fastrpc-cdsp* nodes" "install the driver packages, docs/developer-guide.md §3.2"
 echo "    disk free on /: $(df -h / | awk 'NR==2 {print $4}')"
 
-echo "==> 2. Decision layer (d1-2B, Path A)"
+echo "==> 2. Decision layer (d1-2B, Transformers on CPU)"
 [ -x "$D1_PYTHON" ] || fail "no d1 venv at $D1_PYTHON" "follow examples/system-one-decision/README.md (Install)"
 [ -d "$D1_MODEL_DIR" ] || fail "no d1 snapshot at $D1_MODEL_DIR" "$D1_PYTHON examples/system-one-decision/fetch_d1.py --dest $D1_MODEL_DIR"
 (cd "$REPO_ROOT/examples/system-one-decision" && "$D1_PYTHON" check_env.py) \

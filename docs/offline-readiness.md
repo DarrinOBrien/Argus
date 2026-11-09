@@ -66,18 +66,32 @@ The [static audit](../skills/iq9-offline-rehearsal/scripts/offline_audit.py) hel
 python3 skills/iq9-offline-rehearsal/scripts/offline_audit.py apps/my-agent
 ```
 
-Review each finding and the dependencies it cannot inspect. A static scan is not a substitute for running the app with its uplinks disconnected.
+Review each finding and the dependencies it cannot inspect. A static scan is not a substitute for running the app with its external uplinks disconnected.
+
+## Display and USB-C access
+
+- **External monitor:** organizers report that the current Adreno APT update causes a GPU-driver issue. Teams using a monitor must **remove/roll back that update**, confirm the procedure with the organizers and board owner, and test the display before the cut. Do not blindly uninstall GPU packages or reintroduce `qcom-adreno1` via the NPU setup recipes. See [Developer Notes](../README.md#external-monitors-and-headless-setups).
+- **Headless SSH/web UI:** SSH is not affected by the monitor issue. A configured **USB-C network link** between a laptop and the board is allowed for local control and an app web UI during the network-off demo. A USB-C cable alone does not establish networking; stage and test the link and SSH while the external network is still available.
+- **Keep it isolated:** disable laptop internet sharing, bridging, and forwarding to external networks; disconnect/disable external uplinks and verify that neither the app nor the board can reach internet services through the laptop. The browser must use local UI assets, not CDNs or cloud APIs. All inference stays on the board.
+
+Prefer SSH port forwarding over exposing the inference server or app listener. For an existing app web server listening on the board's `127.0.0.1:8000`, run this in a separate laptop terminal (replace `8000` with the app's actual port and set `IQ9_HOST` to the board's USB-link SSH host):
+
+```bash
+ssh -N -o ExitOnForwardFailure=yes -L 127.0.0.1:8000:127.0.0.1:8000 "$IQ9_HOST"
+```
+
+Open `http://127.0.0.1:8000` in the laptop browser. This command forwards an existing server; it does not configure USB networking or start the web app. Keep GenieX bound to `127.0.0.1:18181`, and have the app call it locally on the board. Test the browser workflow after the external network is cut, including cold startup and local asset loading.
 
 ## Rehearsal: network-off test
 
-Get explicit approval before a network cut or reboot. Use the board's local console: disconnecting networking over SSH can also disconnect your control session.
+Get explicit approval before a network cut or reboot. Use a tested local console or an isolated USB-C SSH session; disconnecting the uplink carrying SSH can also disconnect your control session. Have a tested restoration plan, including after a reboot if one is planned.
 
-1. Disconnect Ethernet, disable Wi-Fi, and check for other uplinks, including USB networking. An external `curl` failure alone does not establish that all links are down.
+1. Disconnect Ethernet, disable Wi-Fi, and inspect other possible external uplinks, including USB networking. An isolated USB-C control/UI link may remain, but must not provide internet access via the laptop. Inspect routes and laptop sharing/forwarding settings; an external `curl` failure alone does not establish isolation.
 2. Start the generator from a stopped state in a separate terminal, then launch the app using its normal command. A reboot is optional, not required.
 3. Send a capped request and inspect the current server's device/offload log for `HTP0`. Investigate missing device output rather than assuming CPU fallback.
 4. Run the core workflow for at least 10 minutes, including an event that triggers an explanation or allowlisted action. Exercise local UI assets and input handling too.
 5. Inspect the app's flushed JSONL for decisions, executed actions, usable explanations, and errors. Check responsiveness and memory for the intended workload.
-6. Restore networking from the local console when the rehearsal is complete.
+6. Restore external networking through the tested local console or isolated USB-C control session when the rehearsal is complete.
 
 Do not use a generic one-interface network-cut script. A scripted cut needs an approved interface list and a restoration plan.
 

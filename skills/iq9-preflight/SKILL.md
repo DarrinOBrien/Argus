@@ -33,12 +33,21 @@ ssh "$IQ9_HOST" 'bash -s -- --json --profile reference' < skills/iq9-preflight/s
 
 | Check | What it means when it isn't ok |
 |---|---|
-| `npu-nodes`, `npu-access` | Investigate NPU drivers/access. Do not infer CPU execution or quote legacy speed from this check alone |
+| `display` WARN | Always emitted in every profile: monitor compatibility is not checked. This is the Adreno setup warning, not a detected display failure; see the display guidance below |
+| `npu-nodes`, `npu-access` | Inspect current drivers/access and follow developer-guide section 3.2 with approval. Do not install/update Adreno as a generic NPU fix or infer CPU execution from this check alone |
 | `geniex` WARN | The version differs from v0.10.0, so the LFM3 path may not hold. Don't change versions between rehearsal and demo |
 | `model:<selected name>` | The selected model is not registered. Inspect local weights and cache before asking about an import/download |
 | `d1-venv`, `d1-snapshot` | Required only by the reference profile. Follow `examples/system-one-decision/README.md` if this app uses d1 |
 | `server` WARN | Normal if nothing has started it yet. See the `iq9-geniex-lfm` skill |
 | `disk` WARN | Under 10 GB free. Run `geniex list` and ask the user before removing anything |
+
+## Display and control path
+
+Organizers report that the current Adreno APT update causes a GPU-driver issue with external monitors. For a monitor setup, **remove/roll back that update** using the organizers' board-specific procedure and owner approval; do not blindly purge packages or reinstall/update `qcom-adreno1`. See [Developer Notes](../../README.md#external-monitors-and-headless-setups). Every profile includes a `display` WARN in both text and JSON output, even when all required checks pass. This does not fail the run or mean a broken monitor was detected: the script does not test the display or identify affected package versions. `ready: true` is not proof of monitor compatibility or recovery.
+
+The upstream `install_ppa_pkgs.sh` linked from the developer guide is **not adapted for this event's monitor issue**. Do not run it unchanged for a monitor setup until organizers confirm the graphics changes to omit or roll back. No event-specific patched installer is provided; see [driver setup](../../docs/developer-guide.md#32-driver-packages).
+
+SSH is unaffected. An isolated, configured USB-C network link can carry SSH and a board-hosted app web UI during the network-off demo. Test it before cutting external uplinks, disable laptop internet sharing/forwarding, and keep the inference listener on loopback. See [display and USB-C access](../../docs/offline-readiness.md#display-and-usb-c-access).
 
 ## Deeper checks (on request)
 

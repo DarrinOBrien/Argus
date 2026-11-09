@@ -2,11 +2,11 @@
 
 Reference documentation for developers at the On-Device AI Hackathon: Cleared for Takeoff.
 
-- **Hardware:** Dragonwing IQ-9075 EVK, Ubuntu 24.04 aarch64.
-- **Generator and tools:** choose an LFM3-family model that fits the project. The examples default to LFM3-1.7B GGUF through GenieX v0.10.0 on the NPU.
-- **Optional decision layer:** d1-2B through Transformers on the CPU, or a rule/another decision design.
-- **Inputs:** external sensors are optional and not supplied. Use brought sensors, internal readings, local files/events, or simulated inputs.
-- **Deployment:** the final demo runs without the network.
+* **Hardware:** Dragonwing IQ-9075 EVK, Ubuntu 24.04 aarch64.
+* **Generator and tools:** choose an LFM3-family model that fits the project. The examples default to LFM3-1.7B GGUF through GenieX v0.10.0 on the NPU.
+* **Optional decision layer:** d1-2B through Transformers on the CPU, or a rule/another decision design.
+* **Inputs:** external sensors are optional and not supplied. Use brought sensors, internal readings, local files/events, or simulated inputs.
+* **Deployment:** the final demo runs without the network.
 
 ## Table of contents
 
@@ -25,11 +25,16 @@ Reference documentation for developers at the On-Device AI Hackathon: Cleared fo
 
 ## 1. Pre-work
 
-- [GenieX quickstart](https://geniex.aihub.qualcomm.com/en/get-started/quickstart)
-- [GenieX platforms and runtimes](https://geniex.aihub.qualcomm.com/en/get-started/platforms)
-- [IQ-9075 EVK setup](https://dragonwingdocs.qualcomm.com/Ubuntu/devices/iq9075-evk/set-up-the-device)
-- [LFM3-1.7B GGUF model card](https://huggingface.co/LiquidAI/LFM3-1.7B-GGUF)
-- [d1-2B model card](https://huggingface.co/LiquidAI/d1-2B)
+**Event boards will arrive with freshly flashed Ubuntu images.** Use Qualcomm's required-software guide for post-flash setup, then install and stage your project's runtimes, dependencies, and models while internet access is available. Do not assume the image already includes GenieX, torch, or model weights.
+
+* [IQ-9075 EVK setup](https://dragonwingdocs.qualcomm.com/Ubuntu/devices/iq9075-evk/set-up-the-device)
+* [IQ-9075: Install Required Software Packages](https://dragonwingdocs.qualcomm.com/Ubuntu/devices/iq9075-evk/Install_required_software_packages)
+* [GenieX quickstart](https://geniex.aihub.qualcomm.com/en/get-started/quickstart)
+* [GenieX platforms and runtimes](https://geniex.aihub.qualcomm.com/en/get-started/platforms)
+* [LFM3-1.7B GGUF model card](https://huggingface.co/LiquidAI/LFM3-1.7B-GGUF)
+* [d1-2B model card](https://huggingface.co/LiquidAI/d1-2B)
+
+The required-software page covers a broad set of AI, camera, and multimedia use cases; not every package is needed by every project. Read the [monitor caveat in section 3.2](#32-driver-packages) before running its installation script.
 
 Run commands below on the board from the repo root unless a different directory is specified. From a laptop, use the board host supplied by the owner; do not assume the laptop has GenieX, the NPU, or the models.
 
@@ -37,7 +42,9 @@ Run commands below on the board from the repo root unless a different directory 
 
 ### 2.1 Two models, two jobs
 
-The reference monitor separates a decision from its explanation:
+**This is an example implementation, not a prescribed architecture or a recipe for the hackathon.** It shows one way you *could* combine a decision gate, guarded actions, and an explanation model. Teams do not need to follow this pattern, use d1, or build a two-model monitor to compete or win. Choose the design that best serves your project's purpose and the [judging criteria](judging.md).
+
+In this example, the reference monitor separates a decision from its explanation:
 
 ```text
 Local observation
@@ -56,23 +63,23 @@ d1-2B or a rule: decide whether anything needs attention
                                 local JSONL log
 ```
 
-A rule can replace d1 when the decision is simple. Keep d1 and LFM generation sequential. The model may propose actions, but code validates and authorizes them.
+A rule can replace d1 when the decision is simple. If you use both d1 and LFM in the reference stack, keep their inference sequential. The model may propose actions, but code validates and authorizes them.
 
 ### 2.2 Runtimes and routes
 
-| Work | Reference route |
-|---|---|
-| LFM generation and tools | GenieX `llama_cpp`, cached GGUF, NPU |
-| Optional d1 gate | Transformers `system_one()`, local snapshot, fp32 CPU |
+| Work                     | Reference route                                       |
+| ------------------------ | ----------------------------------------------------- |
+| LFM generation and tools | GenieX `llama_cpp`, cached GGUF, NPU                  |
+| Optional d1 gate         | Transformers `system_one()`, local snapshot, fp32 CPU |
 
 ### 2.3 Compute units
 
-| `--compute` | Route | Guidance |
-|---|---|---|
-| `npu` | Hexagon HTP | Reference generator route |
-| `hybrid` | HTP and CPU | Evaluate on the selected model and workload before choosing |
-| `cpu` | CPU | Explicit alternative for compatible models; d1 Path A uses CPU separately |
-| `gpu` | Adreno/OpenCL | Requires a compatible model/runtime configuration |
+| `--compute` | Route         | Guidance                                                                               |
+| ----------- | ------------- | -------------------------------------------------------------------------------------- |
+| `npu`       | Hexagon HTP   | Reference generator route                                                              |
+| `hybrid`    | HTP and CPU   | Evaluate on the selected model and workload before choosing                            |
+| `cpu`       | CPU           | Explicit alternative for compatible models; d1 uses Transformers on the CPU separately |
+| `gpu`       | Adreno/OpenCL | Requires a compatible model/runtime configuration                                      |
 
 After a capped generator request, inspect the current device/offload log for `HTP0`. Missing device output calls for diagnosis, not an automatic CPU-fallback conclusion.
 
@@ -84,22 +91,36 @@ Budget disk, host RAM, and device buffers separately. Inspect `df -h /` and `fre
 
 ### 3.1 Confirm the board
 
-Start board work with the [preflight](../skills/iq9-preflight/SKILL.md):
+Start with the hardware-only [preflight](../skills/iq9-preflight/SKILL.md) on a fresh image:
 
 ```bash
-bash skills/iq9-preflight/scripts/preflight.sh --json
+bash skills/iq9-preflight/scripts/preflight.sh --profile board --json
 ```
 
-The default profile checks the full reference stack. For an app without d1, use `--profile generator --model 'cached-name:precision'`; use `--profile board` for hardware-only checks. Choose the profile for the app rather than requiring every reference model.
+This inspects hardware/driver readiness without expecting GenieX, model weights, or a d1 environment. Missing driver checks may still need the package setup below; they are not by themselves proof that flashing failed.
+
+Every profile also emits a `display` warning about the Adreno monitor issue. It is a setup reminder, not a detected display failure: preflight does not test monitor compatibility or identify affected graphics-package versions. A passing run does not establish that a monitor setup works.
+
+After setup and model staging, choose the app's profile: `--profile generator --model 'cached-name:precision'` without d1, or `--profile reference` for the full example stack. Missing runtimes/models are expected before they have been installed or staged.
 
 ### 3.2 Driver packages
 
-Inspect the current drivers and permissions before making changes. With the board owner's approval, install missing base and NPU libraries:
+For post-flash setup, refer to Qualcomm's [Install Required Software Packages](https://dragonwingdocs.qualcomm.com/Ubuntu/devices/iq9075-evk/Install_required_software_packages) guide.
+
+**External monitor warning:** organizers report that the current Adreno APT update causes a GPU-driver issue with an external monitor. Teams using a monitor must **remove/roll back that update**; SSH is unaffected. See [Developer Notes](../README.md#external-monitors-and-headless-setups). Confirm installed versions and the board-specific removal/rollback procedure with the organizers and board owner; do not blindly purge GPU packages.
+
+**The linked upstream `install_ppa_pkgs.sh` is not adapted for this event's monitor issue.** Do not run it unchanged for a monitor setup until organizers confirm which graphics changes to omit or roll back.
+
+Its Server path installs `qcom-adreno1`; its Desktop path installs `qcom-adreno-cl-dev`, adds a Mesa PPA, and upgrades `libegl-mesa0`. It also performs a broad package upgrade and reboots. These are the script's graphics changes, not confirmed causes of the monitor issue; excluding `qcom-adreno1` alone is not a verified Desktop workaround.
+
+No event-specific patched installer is provided here. The affected packages/versions and approved installation or rollback procedure need confirmation before one can be supplied.
+
+Inspect the current drivers and permissions before making changes. With the board owner's approval, install only missing base and NPU libraries. Do not install/update `qcom-adreno1` as part of this NPU setup:
 
 ```bash
 sudo apt update
 sudo apt install -y libatomic1 libglib2.0-0 ocl-icd-libopencl1
-sudo apt-get install -y qcom-adreno1 qcom-fastrpc1 libqnn1
+sudo apt-get install -y qcom-fastrpc1 libqnn1
 ```
 
 Check device nodes with `ls /dev/fastrpc-cdsp*`. For permission errors, inspect group membership; with approval, add the user to `fastrpc` and log in again. Follow the board setup guide rather than adding duplicate package sources.
@@ -120,7 +141,15 @@ Keep the installer and matching archive locally for recovery. No runtime install
 
 ### 3.4 Python environment for the decision layer
 
-Skip this step if the app does not use d1. Inspect the existing environment first; create one only if needed and with approval:
+Skip this step if the app does not use d1. Reuse a compatible existing d1 environment if available. Before creating a venv that inherits system packages, check whether the board's Python already has torch:
+
+```bash
+python3 -c 'import torch; print(torch.__version__)'
+```
+
+A fresh image may not include torch. If it is missing, arrange a compatible aarch64 CPU torch installation and matching torchvision with approval before continuing. The example requirements deliberately omit torch and pin torchvision to the reference pairing (torch 2.11.0 / torchvision 0.26.0); do not assume these are preinstalled or replace a working installation blindly.
+
+Create the environment only if needed, with approval, and stage dependencies while networking is available:
 
 ```bash
 python3 -m venv --system-site-packages ~/.venvs/d1
@@ -128,7 +157,7 @@ source ~/.venvs/d1/bin/activate
 python -m pip install -r examples/system-one-decision/requirements.txt
 ```
 
-Reuse the board's torch installation and keep torchvision matched to it. The [System One example](../examples/system-one-decision/README.md) covers the pinned snapshot, remote-code review, and environment checks.
+If torch is already present, reuse it and match torchvision to that build, adjusting the dependency selection as needed before installation. The [System One example](../examples/system-one-decision/README.md) covers the pinned snapshot, remote-code review, and environment checks; its previously installed board packages are historical reference information, not a guarantee for the freshly flashed event images.
 
 <a id="4-first-model-in-five-minutes"></a>
 
@@ -172,18 +201,18 @@ curl -sS --max-time 60 http://127.0.0.1:18181/v1/chat/completions \
   }'
 ```
 
-- Cap every chat call with `max_completion_tokens`; use `max_tokens` on raw completions.
-- Inspect answer content and reasoning separately. Positive token usage does not make an empty answer usable.
-- For direct LFM3-1.7B answers, try `enable_think: false` or the helper's closed-reasoning raw template. Keep output validation either way.
-- Tag raw prompts before the first call and retry unusable output once. Return persistent errors as data.
-- Plan for idle unloading and warm up with a capped request before the demo. See [Server lifecycle](runtimes.md#server-lifecycle-model-loading-and-idle-unloading).
-- Do not bind to non-loopback addresses or interrupt shared servers without approval.
+* Cap every chat call with `max_completion_tokens`; use `max_tokens` on raw completions.
+* Inspect answer content and reasoning separately. Positive token usage does not make an empty answer usable.
+* For direct LFM3-1.7B answers, try `enable_think: false` or the helper's closed-reasoning raw template. Keep output validation either way.
+* Tag raw prompts before the first call and retry unusable output once. Return persistent errors as data.
+* Plan for idle unloading and warm up with a capped request before the demo. See [Server lifecycle](runtimes.md#server-lifecycle-model-loading-and-idle-unloading).
+* Do not bind to non-loopback addresses or interrupt shared servers without approval.
 
 The standard-library [LFM client](../skills/iq9-geniex-lfm/scripts/lfm_client.py) provides these request guards. [Runtime reference](runtimes.md) describes endpoints and fields.
 
 ## 6. The decision layer
 
-If using d1-2B, use Path A: a pinned local snapshot through Transformers, fp32 on the CPU. Load once and reuse it. Set offline/telemetry settings before imports and pass `local_files_only=True` to the loader.
+If using d1-2B, run a pinned local snapshot through Transformers in fp32 on the CPU. Load once and reuse it. Set offline/telemetry settings before imports and pass `local_files_only=True` to the loader.
 
 The [decision-layer reference](decision-models.md) includes loading, typed questions, and calibration. The runnable [System One example](../examples/system-one-decision/README.md) shows state, image, and batch calls.
 
@@ -242,23 +271,24 @@ Put app results in the app's README with the board, runtime, model/precision, wo
 
 Stage the chosen models, packages, UI assets, docs, and sample data before the cut. At runtime, load local snapshots/cache entries only; do not install packages, pull models, send telemetry, or fetch remote assets.
 
-Rehearse cold startup and the core workflow with all uplinks disconnected. Get approval before cutting the network and use the board's local console; a cut over SSH may disconnect your session.
+Rehearse cold startup and the core workflow with all external uplinks disconnected. A configured, isolated USB-C link may remain for SSH and an app web UI, with no laptop internet sharing/forwarding. Get approval before cutting the network; use a working local console or a tested isolated USB-C SSH session, not SSH over the uplink being cut. See [display and USB-C access](offline-readiness.md#display-and-usb-c-access).
 
 Full checklist: [Offline readiness](offline-readiness.md).
 
 ## 12. Troubleshooting
 
-| Symptom | What to inspect | Next step |
-|---|---|---|
-| `geniex: command not found` | Installed CLI path and shell `PATH` | Use the existing install or follow approved setup; do not reinstall blindly |
-| Missing NPU libraries | Driver packages and loader error | Install missing packages with approval; see section 3.2 |
-| CDSP permission denied | Device permissions and `fastrpc` group | Correct group membership with approval, then log in again |
-| Slow generator or no HTP0 output | Current server log, compute route, drivers, permissions | Diagnose NPU access without silently changing compute |
-| Long or reasoning-only answer | Token cap, prompt template, answer/reasoning fields | Keep the cap, try direct-answer controls, and validate usable content |
-| Empty answer or zero LFM tokens | Response body, prompt uniqueness, cap | Retry once with a fresh tag; log persistent failure before safely relaunching the owned server |
-| d1 request sent to a server endpoint | Integration route | Use the local Path A API |
-| Slower first or post-idle request | Weight loading and keepalive | Plan cold/warm startup and adjust keepalive for quiet gaps |
-| Benchmark cannot find libraries | Archive layout and `LD_LIBRARY_PATH` | Set paths to the matching local benchmark libraries |
-| No space left on device | Cache, snapshots, archives, duplicate copies | Ask the owner before removing unused files |
-| Python import fails | Selected interpreter, venv, package versions | Inspect the environment before changing or recreating it |
-| d1 loader requests code approval | Snapshot revision and loader options | Review local model code before enabling `trust_remote_code=True` |
+| Symptom                                                      | What to inspect                                         | Next step                                                                                                                                      |
+| ------------------------------------------------------------ | ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `geniex: command not found`                                  | Installed CLI path and shell `PATH`                     | Use the existing install or follow approved setup; do not reinstall blindly                                                                    |
+| External monitor/GPU-driver issue after an Adreno APT update | Installed Adreno package versions and update history    | With approval, remove/roll back the update using the organizers' board-specific procedure; SSH/USB-C web UI is an alternative. See section 3.2 |
+| Missing NPU libraries                                        | Driver packages and loader error                        | Install only missing packages with approval; do not reinstall/update Adreno as a generic NPU fix. See section 3.2                              |
+| CDSP permission denied                                       | Device permissions and `fastrpc` group                  | Correct group membership with approval, then log in again                                                                                      |
+| Slow generator or no HTP0 output                             | Current server log, compute route, drivers, permissions | Diagnose NPU access without silently changing compute                                                                                          |
+| Long or reasoning-only answer                                | Token cap, prompt template, answer/reasoning fields     | Keep the cap, try direct-answer controls, and validate usable content                                                                          |
+| Empty answer or zero LFM tokens                              | Response body, prompt uniqueness, cap                   | Retry once with a fresh tag; log persistent failure before safely relaunching the owned server                                                 |
+| d1 request sent to a server endpoint                         | Integration route                                       | Call `model.system_one()` locally through Transformers on the CPU                                                                              |
+| Slower first or post-idle request                            | Weight loading and keepalive                            | Plan cold/warm startup and adjust keepalive for quiet gaps                                                                                     |
+| Benchmark cannot find libraries                              | Archive layout and `LD_LIBRARY_PATH`                    | Set paths to the matching local benchmark libraries                                                                                            |
+| No space left on device                                      | Cache, snapshots, archives, duplicate copies            | Ask the owner before removing unused files                                                                                                     |
+| Python import fails                                          | Selected interpreter, venv, package versions            | Inspect the environment before changing or recreating it                                                                                       |
+| d1 loader requests code approval                             | Snapshot revision and loader options                    | Review local model code before enabling `trust_remote_code=True`                                                                               |

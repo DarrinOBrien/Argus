@@ -24,6 +24,7 @@ skills/iq9-geniex-lfm/scripts/serve.sh stop      # only when safe to interrupt t
 `start`/`restart` retain the detached runner for compatibility. Use them only with an agreed logged runner. For a foreground restart, stop the owned server and run `run` again in its terminal; do not silently replace it with a detached job.
 
 - The server listens on loopback only, at `127.0.0.1:18181`, and never downloads models.
+- **Headless demo:** SSH is unaffected by the organizer-reported Adreno monitor issue. Keep GenieX on loopback and use SSH port forwarding for a board-hosted app web UI over a configured, isolated USB-C network link; disable laptop internet sharing/forwarding. Monitor setups must remove/roll back the Adreno APT update with approval, not reinstall/update `qcom-adreno1` as a generic NPU fix. See [Developer Notes](../../README.md#external-monitors-and-headless-setups) and [USB-C access](../../docs/offline-readiness.md#display-and-usb-c-access).
 - `kill $!` does not stop it, because `geniex` is a launcher. `serve.sh stop` stops the process that holds the port. Never use `pkill -f "geniex serve"` over SSH; it also matches the SSH command itself.
 - **Cold start:** the first request loads weights. Measure the chosen model's cold/reload penalty; do not transfer the legacy five-second figure.
 - **Idle unload:** the model unloads after `--keepalive` seconds idle (300 s by default). `serve.sh` sets 1800 s. Before a demo, send one warm-up request.
@@ -71,7 +72,7 @@ Put any new number in the app's README with its marker (🧪 measured, ⚠️ un
 
 ## 5. Don'ts
 
-- If using d1-2B, keep the pinned local fp32 CPU Path A. The tested GGUF decision requests failed; this is not a blanket GenieX limitation (`iq9-d1-decision-gate`).
+- If using d1-2B, use the pinned local snapshot through Transformers in fp32 on the CPU. The tested GGUF decision requests failed; this is not a blanket GenieX limitation (`iq9-d1-decision-gate`).
 - Don't load models by Hugging Face repo ID from app code. It fails offline.
 - Don't bind the server to `0.0.0.0` unless the user asks for it.
 - Don't change GenieX versions between rehearsal and the event. The active target is v0.10.0.
