@@ -23,9 +23,12 @@ No SSH connection yet? Start with the board's **micro-USB debug UART**, then con
 * **Hardware:** Dragonwing IQ-9075 EVK only (QCS9075, Hexagon v73 NPU, 36 GB LPDDR5). External sensors are optional and will not be provided; participants are welcome to bring their own.
 * **Generator and tools:** Choose **any model in LiquidAI's LFM3 family** that fits your project.
 * **Reference generator:** This repo's examples use `LiquidAI/LFM3-1.7B-GGUF` (Q4_0) via GenieX v0.10.0—a starting point, not a required model.
+* **Optional ZETIC route:** [LFM3-1.7B text and LFM3-Omni-2B text/image/audio examples](examples/zetic-lfm/README.md), using ZETIC's prebuilt Hexagon SDK CLI and v73 packages. This complements GenieX; it does not replace the reference server. IQ9 smoke checks passed while connected; network-off rehearsal remains unperformed.
 * **Optional decision layer:** `LiquidAI/d1-2B`, a decision model that answers typed questions in one pass with no output tokens.
 
 Start with [LiquidAI's LFM3 family on Hugging Face](https://huggingface.co/collections/LiquidAI/lfm3), then review each model's card and file list. Other LFM models are also options. The example READMEs explain their reference choices.
+
+For ZETIC's Dragonwing packages, see the [LFM3 and d1 on Dragonwing IQ9 collection](https://huggingface.co/collections/ZETIC-ai/lfm3-and-d1-on-dragonwing-iq9). The [ZETIC SDK and sample apps](https://github.com/zetic-ai/LFM3-zetic-apps) supply the prebuilt CLI and fixtures used by our optional example.
 
 For any model you choose, verify [format, precision, runtime, and NPU compatibility](docs/runtimes.md#model-format-and-precision), [stage its required assets before the network cut](docs/offline-readiness.md#disk-first), and test it on the board offline before a demo. Reference-stack results do not verify another model or precision.
 
@@ -66,6 +69,7 @@ Judging weights and the "why not just a cloud API call?" question are in [`docs/
 | `docs/judging.md`               | Scoring rubric, demo format, metrics to show                                                                                                                                   |
 | `examples/system-one-decision/` | `system_one()` with Transformers on the CPU. Installation, pinned fetch, environment check, example.                                                                              |
 | `examples/lfm-server-npu/`      | LFM3-1.7B: start `geniex serve` on the NPU, send one capped chat request, stop it                                                                                              |
+| `examples/zetic-lfm/`          | Optional ZETIC CLI: capped LFM3-1.7B text and LFM3-Omni-2B local image/audio → text, staging, timing, and verified scope                                                        |
 | `examples/always-on-agent/`     | The always-on loop, runnable: observe, decide (d1), act through an allowlist, explain alerts (LFM, raw completion), log to JSONL                                               |
 | `examples/tool-calling/`        | LFM3-1.7B: native `tools` calls, schema validation, allowlist, and a policy check before any write action                                                                      |
 | `starter/`                      | `run.sh`: checks the board, runs one decision pass and one generation, and points to the next example                                                                          |
@@ -118,10 +122,13 @@ skills/iq9-geniex-lfm/scripts/serve.sh status
 
 Check the answer and the current server's `HTP0` log line; a preflight pass alone is not verification. See the [generator skill](skills/iq9-geniex-lfm/SKILL.md) for server reuse and output guards. If your project needs d1, set it up separately with [`examples/system-one-decision`](examples/system-one-decision/README.md); it is optional.
 
+For local image/audio projects or an alternative text route, see the [ZETIC example](examples/zetic-lfm/README.md) and [why it is included](docs/developer-guide.md#25-optional-zetic-route). It uses separate SDK/model assets, not the GenieX cache or OpenAI-compatible endpoints.
+
 ## Licensing
 
-This repository's code and docs are under the [MIT License](LICENSE). They do not include LiquidAI model weights or model code. The models are downloaded separately, by `geniex pull` and `fetch_d1.py`, and each one keeps its own licence:
+This repository's code and docs are under the [MIT License](LICENSE). They do not include LiquidAI model weights/model code or ZETIC SDK binaries. Models and third-party runtimes are staged separately, and each keeps its own licence:
 
 * `LiquidAI/d1-2B` and `LiquidAI/LFM3-1.7B-GGUF` are under the **LFM Open License v1.0** (`lfm1.0`). It includes a commercial-use limit for organisations above US$10M annual revenue. Read each model card's LICENSE before you publish or commercialise a demo.
 * Other checkpoints may have different terms. Read the LICENSE for each selected model's weights and code; the Hub's license tag alone is not a substitute for those terms.
 * GenieX is distributed by Qualcomm under its own terms.
+* ZETIC's LFM3 packages retain the LFM Open License v1.0. SDK dependencies and Hexagon-built libraries have separate terms; inspect the vendor's `LICENSES` and `PROVENANCE.json`, and confirm redistribution permission before supplying event media. Gated model access is not blanket redistribution permission.

@@ -7,6 +7,7 @@ Instructions for coding agents helping teams at the **On-Device AI Hackathon: Cl
 Docs and examples for the **Dragonwing IQ-9075 EVK**, Ubuntu 24.04 aarch64. Start with the [developer guide](docs/developer-guide.md); consult [Developer Notes](README.md#developer-notes) for setup warnings and reference-stack rules.
 
 - **Reference generator:** `LiquidAI/LFM3-1.7B-GGUF:Q4_0`, GenieX **v0.10.0**, NPU, `127.0.0.1:18181`.
+- **Optional ZETIC generator:** read [the ZETIC example](examples/zetic-lfm/README.md) before using its prebuilt Hexagon SDK 0.1.0 CLI with LFM3-1.7B or LFM3-Omni-2B v73 packages. This is separate from GenieX; do not replace the reference stack or import ZETIC packages into its cache.
 - **Optional decision gate:** `LiquidAI/d1-2B`, Transformers on the CPU, local snapshot at `~/models/d1-2B`.
 - These are defaults, not eligibility restrictions. Any LFM3-family model is welcome; other LFM models are options. Verify the chosen model's format, runtime, NPU support, and task behavior. A rule can replace d1.
 - **Model media:** teams receive USB drives with model assets and have been asked to bring USB-C dongles/adapters. Ask whether the participant has the supplied drive and a suitable adapter before proposing model downloads. **Copy/import models onto board storage; never move them or delete/modify the source drive.** See [USB model staging](docs/developer-guide.md#usb-model-drive-copy-never-move).
@@ -34,13 +35,13 @@ Docs and examples for the **Dragonwing IQ-9075 EVK**, Ubuntu 24.04 aarch64. Star
 
 1. **Offline at runtime:** load local snapshots/cache entries only. No downloads, installs, telemetry, cloud services, or CDN assets. Enable offline loading settings before Transformers imports and use `local_files_only=True`.
 
-2. **Cap and validate LFM calls:** use `max_completion_tokens` for chat and `max_tokens` for completions. Reject zero/missing tokens and empty or reasoning-only text answers; validate tool calls for tool requests. Tokens or `ok` do not prove usability. Follow the generator skill.
+2. **Cap and validate LFM calls:** use `max_completion_tokens` for GenieX chat and `max_tokens` for completions; use `--max-tokens` for the ZETIC CLI. Reject zero/missing tokens and empty or reasoning-only text answers; validate tool calls for tool requests. Tokens or `ok` do not prove usability. Follow the generator skill for GenieX and the ZETIC example for its separate CLI.
 
 3. **If using d1:** load the pinned local snapshot through Transformers, fp32 CPU, once—not GenieX decision endpoints. Keep d1/LFM sequential unless re-measured. Calibrate task-representative labels with held-out evaluation; never copy 0.5 or synthetic thresholds. d1's zero output tokens are expected.
 
 4. **Code authorizes actions:** validate schemas, enforce allowlists and policy before writes or real-world actions, and report code's action records—not model prose. Log each iteration as flushed JSONL, separating proposals, actions, and errors. Return loop errors as data, not crashes.
 
-5. **Verify generator NPU execution:** send a capped request and inspect the current server's device/offload log for `HTP0`. Missing output needs diagnosis, not an assumed CPU fallback. Do not silently switch compute routes.
+5. **Verify generator NPU execution:** send a capped request. For GenieX, inspect the current server's device/offload log for `HTP0`. For ZETIC, inspect the current CLI's Hexagon v73/two-NSP load and device logs; CPU work remains, so do not claim entirely-NPU execution. Missing output needs diagnosis, not an assumed CPU fallback. Do not silently switch compute routes.
 
 6. **Get approval before changes:** system/runtime installation or upgrades; model copies/downloads/imports/removal (`geniex pull/remove/clean`, `fetch_d1.py`); changing the d1 revision pin or user configuration (including network, account, and SSH settings); deleting user files; non-loopback server binding; or network cuts. This includes laptop serial-tool/driver installation. Review snapshot code before enabling `trust_remote_code`.
 

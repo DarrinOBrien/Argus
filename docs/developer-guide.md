@@ -4,6 +4,7 @@ Reference documentation for developers at the On-Device AI Hackathon: Cleared fo
 
 * **Hardware:** Dragonwing IQ-9075 EVK, Ubuntu 24.04 aarch64.
 * **Generator and tools:** choose an LFM3-family model that fits the project. The examples default to LFM3-1.7B GGUF through GenieX v0.10.0 on the NPU.
+* **Optional ZETIC route:** LFM3-1.7B text and LFM3-Omni-2B local image/audio → text through ZETIC's Hexagon SDK. See [why it is included](#25-optional-zetic-route) and the [example](../examples/zetic-lfm/README.md).
 * **Optional decision layer:** d1-2B through Transformers on the CPU, or a rule/another decision design.
 * **Inputs:** external sensors are optional and not supplied. Use brought sensors, internal readings, local files/events, or simulated inputs.
 * **Deployment:** the final demo runs without the network.
@@ -183,12 +184,15 @@ A rule can replace d1 when the decision is simple. If you use both d1 and LFM in
 
 ### 2.2 Runtimes and routes
 
-| Work                     | Reference route                                       |
+| Work                     | Route                                                 |
 | ------------------------ | ----------------------------------------------------- |
-| LFM generation and tools | GenieX `llama_cpp`, cached GGUF, NPU                  |
+| Reference LFM generation and tools | GenieX `llama_cpp`, cached GGUF, NPU          |
+| Optional LFM text/image/audio → text | ZETIC Hexagon SDK, local v73 packages      |
 | Optional d1 gate         | Transformers `system_one()`, local snapshot, fp32 CPU |
 
 ### 2.3 Compute units
+
+The `--compute` options below describe GenieX, not ZETIC's separate CLI.
 
 | `--compute` | Route         | Guidance                                                                               |
 | ----------- | ------------- | -------------------------------------------------------------------------------------- |
@@ -202,6 +206,18 @@ After a capped generator request, inspect the current device/offload log for `HT
 ### 2.4 Hardware budget
 
 Budget disk, host RAM, and device buffers separately. Inspect `df -h /` and `free -h` before staging models. See [Offline readiness: disk first](offline-readiness.md#disk-first) for asset and staging budgets.
+
+### 2.5 Optional ZETIC route
+
+**GenieX remains the reference Python/server path.** ZETIC is a complementary option for hackathon projects needing a different model/input route, particularly when the selected GenieX build lacks the required audio/Omni projector support. Our IQ9 checks produced useful LFM3-1.7B text and LFM3-Omni-2B text, image, and WAV-transcription results using ZETIC's own Hexagon runtime.
+
+The [ZETIC example](../examples/zetic-lfm/README.md) keeps this small: a prebuilt SDK CLI, local files, and a capped Python wrapper. It needs separate **v73 packages**, not GGUFs imported into GenieX. Arrange SDK/model access and stage only needed assets with approval; model access is gated at the time of our check.
+
+**Upstream resources:** [ZETIC's LFM3 and d1 on Dragonwing IQ9 collection](https://huggingface.co/collections/ZETIC-ai/lfm3-and-d1-on-dragonwing-iq9) for model packages, and [ZETIC's SDK and sample apps](https://github.com/zetic-ai/LFM3-zetic-apps) for runtime assets and vendor examples. Our example's staging commands retain the specific revisions tested on this board.
+
+The trade-off is integration: the one-shot CLI reloads per invocation, while GenieX's resident server is convenient for repeated Python calls. ZETIC's C++ SDK can keep a model loaded, but a resident integration is not implemented here. Its current-request device logs identify **Hexagon v73/two NSPs**, rather than GenieX's `HTP0`; CPU work remains, so do not call it entirely-NPU execution. Retain output caps, answer checks, and code-side action policy whichever runtime you choose.
+
+See the example for measured, workload-specific timing and its verified scope. **Connected-board checks are not a network-off rehearsal.** Video, speech generation, tools, and ZETIC d1 are outside this example; the reference d1 route is unchanged.
 
 ## 3. Setup
 
@@ -330,6 +346,8 @@ If torch is already present, reuse it and match torchvision to that build, adjus
 
 Teams receive **USB drives with model assets** and have been asked to bring **USB-C dongles/adapters**. Ask: **“Do you have your supplied USB model drive and a suitable USB-C adapter? Is it connected to the board or your laptop?”** Prefer existing board assets first, then compatible USB assets; model downloads are a separately approved fallback, not the default.
 
+The cache/import commands below apply to the GenieX reference route. For ZETIC, use the [separate SDK/v73 staging recipe](../examples/zetic-lfm/README.md#stage-once-with-approval); do not import its packages into GenieX.
+
 Inspect the cache, disk, and existing local model directories before copying/importing or downloading anything:
 
 ```bash
@@ -393,7 +411,7 @@ curl -sS --max-time 60 http://127.0.0.1:18181/v1/chat/completions \
 * Plan for idle unloading and warm up with a capped request before the demo. See [Server lifecycle](runtimes.md#server-lifecycle-model-loading-and-idle-unloading).
 * Do not bind to non-loopback addresses or interrupt shared servers without approval.
 
-The standard-library [LFM client](../skills/iq9-geniex-lfm/scripts/lfm_client.py) provides these request guards. [Runtime reference](runtimes.md) describes endpoints and fields.
+The standard-library [LFM client](../skills/iq9-geniex-lfm/scripts/lfm_client.py) provides these GenieX request guards. [Runtime reference](runtimes.md) describes endpoints and fields. ZETIC does not use this server/client; its [one-shot wrapper](../examples/zetic-lfm/run.py) caps the vendor CLI, validates text/usage/device evidence, and returns errors as data.
 
 ## 6. The decision layer
 
@@ -440,6 +458,8 @@ Choose an observation interval and token budget based on the app's workload. Inc
 For server requests, use the [metrics collector](../skills/iq9-demo-prep/scripts/collect_metrics.sh). It separates generated-output TTFT from answer TTFT and labels streamed decode timing as an estimate. Do not count SSE chunks as tokens.
 
 The collector's default prompt asks for **one sentence**, so its numbers describe short answers. Short-answer runs are dominated by prefill and TTFT, so they understate sustained decode speed. For your app's workload, pass `--prompt` with a representative request. For long answers, set `--max-tokens` as a generous **safety cap** and check that `finish_reason` is `stop` rather than `length`; a capped run measures the cap, not the answer. Report decode tok/s and end-to-end tok/s separately, and keep the warm-up out of the medians (the collector already does). See the [demo-prep skill](../skills/iq9-demo-prep/SKILL.md#2-numbers-measure-them-never-quote-the-docs-as-your-own).
+
+For ZETIC, use the [example's JSONL timing records](../examples/zetic-lfm/README.md#measurements-and-verified-scope), not the GenieX HTTP collector. Keep runtime-reported generation TTFT/decode separate from CLI wall time and model loading; compare quantizations, output lengths, and instrumentation as well as tok/s.
 
 For a local GGUF benchmark, stage `geniex-bench` matching the runtime, then point it at the actual file:
 
