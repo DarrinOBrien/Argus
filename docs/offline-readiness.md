@@ -8,12 +8,14 @@ Before downloading or importing assets:
 
 ```bash
 df -h /
-geniex list
+if command -v geniex >/dev/null; then geniex list; fi  # not required for ZETIC
 ```
 
 Inspect existing local model directories as well as the cache. A missing cache entry does not mean the weights are absent. **Ask whether the participant has the supplied USB model drive and USB-C dongle/adapter** before proposing downloads. Follow [USB model staging](developer-guide.md#usb-model-drive-copy-never-move): copy/import the selected assets onto board storage, never move them, and leave the source drive unchanged. Budget for intermediate copies; reuse registered models without re-importing.
 
 For planning, the LFM3-1.7B QAD-Q4_0 weights use about **1.05 GB**; the optional d1-2B Transformers snapshot uses about **3.84 GB**. For another model or precision, use its exact artifact's file list and inspect the local files rather than carrying over these estimates.
+
+For ZETIC, inspect the local SDK and selected package directories instead of GenieX registration. Follow the [Ixian SDK and IQ9 package recipe](../examples/zetic-lfm/README.md#stage-once-with-approval), with matching runtime libraries, complete package assets, checksums, and fixtures. Its `v73` generator packages are larger than the reference GGUF; do not use the GGUF size as their disk estimate.
 
 Budget for the full set of matching weights, model code, tokenizer, prompt template, and any modality assets (such as vision projectors or audio tokenizer/vocoder files). Also allow for environments, recovery wheels, runtime archives, UI assets, sample data, and extra copies made during local imports. Stage only what the app needs.
 
@@ -36,10 +38,10 @@ For an offline Python reinstall, stage wheels for the app's requirements and try
 
 ### Models
 
-- [ ] Every generator model used by the app is registered in the local cache on board storage.
+- [ ] Every generator model used by the app is on board storage: registered in the GenieX cache for that runtime, or a complete verified local SDK/package directory for ZETIC.
 - [ ] USB-sourced files have been copied and checked against source sizes/checksums; no runtime path/symlink points back to removable media. After approved safe ejection, startup works without the model drive attached. A storage dongle is not a USB-C network/control link.
 - [ ] Its matching tokenizer, prompt template, projector, and any other required modality assets are present.
-- [ ] If using d1, the full pinned snapshot is at `~/models/d1-2B`; its `REVISION` matches `10e7671d44e4`.
+- [ ] If using reference CPU d1, the full pinned snapshot is at `~/models/d1-2B`; its `REVISION` matches `10e7671d44e4`. A ZETIC d1 app uses its separate native package and records that package/SDK revision instead.
 - [ ] Model code has been reviewed before `trust_remote_code=True` is used.
 - [ ] Model licenses have been read.
 
@@ -56,7 +58,7 @@ Back up board files being replaced when copying updates. Avoid destructive sync 
 
 ## Code rules
 
-- **Local model loads:** Transformers loads a snapshot directory with `local_files_only=True`; GenieX requests use already-registered cached IDs.
+- **Local model loads:** Transformers loads a snapshot directory with `local_files_only=True`; GenieX requests use already-registered cached IDs; ZETIC opens local model package directories with a staged SDK.
 - **Offline settings:** set `HF_HUB_OFFLINE=1`, `TRANSFORMERS_OFFLINE=1`, and `HF_HUB_DISABLE_TELEMETRY=1` before local Transformers imports.
 - **No external runtime dependencies:** no downloads, package installs, telemetry, cloud services, or remote UI assets in the core workflow. Loopback calls to the local inference server are allowed.
 - **Bounded calls:** cap LFM requests, validate output, and log errors without crashing the monitor loop.
@@ -88,8 +90,8 @@ Open `http://127.0.0.1:8000` in the laptop browser. This command forwards an exi
 Get explicit approval before a network cut or reboot. Use a tested local console or an isolated USB-C SSH session; disconnecting the uplink carrying SSH can also disconnect your control session. Have a tested restoration plan, including after a reboot if one is planned.
 
 1. Disconnect Ethernet, disable Wi-Fi, and inspect other possible external uplinks, including USB networking. An isolated USB-C control/UI link may remain, but must not provide internet access via the laptop. Inspect routes and laptop sharing/forwarding settings; an external `curl` failure alone does not establish isolation.
-2. Start the generator from a stopped state in a separate terminal, then launch the app using its normal command. A reboot is optional, not required.
-3. Send a capped request and inspect the current server's device/offload log for `HTP0`. Investigate missing device output rather than assuming CPU fallback.
+2. Start the generator from a stopped state in a separate terminal, then launch the app using its normal command. For the one-shot ZETIC wrapper, launch the CLI through the wrapper normally; there is no server to restart. A reboot is optional, not required.
+3. Send a capped request and verify usable output and current-request device evidence: the current GenieX server's `HTP0` log, or the ZETIC wrapper's Hexagon v73/two-NSP evidence. ZETIC d1 needs its own Decision API/device checks; the generator wrapper does not validate it. Investigate missing device output rather than assuming CPU fallback.
 4. Run the core workflow for at least 10 minutes, including an event that triggers an explanation or allowlisted action. Exercise local UI assets and input handling too.
 5. Inspect the app's flushed JSONL for decisions, executed actions, usable explanations, and errors. Check responsiveness and memory for the intended workload.
 6. Restore external networking through the tested local console or isolated USB-C control session when the rehearsal is complete.

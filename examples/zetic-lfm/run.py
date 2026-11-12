@@ -13,7 +13,7 @@ import subprocess
 import time
 import uuid
 
-SUPPORTED_MODELS = {"lfm3-1.7b", "lfm3-omni-2b"}
+SUPPORTED_MODELS = {"lfm3-1.7b", "lfm3-vl-2b", "lfm3-audio-2b", "lfm3-omni-2b"}
 STATS = re.compile(
     r"\[(\w+)\] finish (\w+) \| prompt (\d+) rows \(cached (\d+)\) -> (\d+) tokens"
 )
@@ -53,9 +53,10 @@ def run(sdk, model, prompt, *, image=None, audio=None, max_tokens=256, timeout=1
         name = manifest.get("package", {}).get("name")
         target = manifest.get("target", {})
         if manifest.get("schema") != "zetic.hexagon.package/1" or name not in SUPPORTED_MODELS:
-            raise ValueError("expected a ZETIC LFM3-1.7B or LFM3-Omni-2B package")
-        if target.get("hexagon_arch") != 73 or target.get("platform") != "linux-arm64-qcom":
-            raise ValueError("expected the IQ9 v73 Linux ARM64 package")
+            raise ValueError("expected a ZETIC LFM3 generative package; d1 requires the separate Decision API")
+        if (target.get("name") != "v73" or target.get("hexagon_arch") != 73
+                or target.get("platform") != "linux-arm64-qcom" or target.get("nsp") != 2):
+            raise ValueError("expected the IQ9 v73 Linux ARM64 two-NSP package")
         capability = "image" if image is not None else "audio" if audio is not None else "text"
         if not manifest.get("capabilities", {}).get(capability):
             raise ValueError(f"package does not support {capability} input")

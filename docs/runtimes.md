@@ -11,9 +11,9 @@ Use `geniex version` and `geniex --help` to inspect the installed runtime. Do no
 | `llama_cpp` through GenieX | GGUF and associated model assets | NPU, GPU, CPU, hybrid, depending on model support | Reference LFM generator |
 | `qairt` | Qualcomm AI Hub bundles | NPU | Alternative deployment format; conversion is outside this guide |
 | Transformers | Local safetensors snapshot and model code | CPU for d1-2B | Optional decision gate |
-| ZETIC Hexagon SDK 0.1.0 | ZETIC v73 packages, not GGUF | Hexagon v73/two NSPs plus CPU work | [Optional LFM3-1.7B and Omni text/image/audio example](../examples/zetic-lfm/README.md) |
+| ZETIC Ixian Hexagon SDK 0.2.1 | Public IQ9 packages, not GGUF | Hexagon v73 plus CPU work; LFM3 also offers `v73-1nsp` | [LFM3 text/image/audio → text wrapper and separate native d1 guidance](../examples/zetic-lfm/README.md) |
 
-ZETIC is separate from GenieX's CLI, cache, and HTTP APIs. Its example uses a prebuilt one-shot CLI and does not change the reference stack; see [why it is included](developer-guide.md#25-optional-zetic-route). The rest of this page's server endpoints/flags describe GenieX.
+ZETIC is separate from GenieX's CLI, cache, and HTTP APIs. Its example uses a prebuilt one-shot CLI, restricted to two-NSP `v73` generators, and does not change the reference stack; see [why it is included](developer-guide.md#25-optional-zetic-route). The current Ixian SDK/packages have not been board-verified here; older SDK 0.1.0 checks do not validate this update. ZETIC d1 uses its native `Decision` API, not the generator wrapper or CPU snapshot. The rest of this page's server endpoints/flags describe GenieX.
 
 ## Model format and precision
 

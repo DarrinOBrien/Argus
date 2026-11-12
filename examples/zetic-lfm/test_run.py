@@ -31,7 +31,7 @@ class RunTests(unittest.TestCase):
         (self.sdk / "lib/libhexrt_v73_skel.so").touch()
         (self.model / "v73").mkdir(parents=True)
         self.manifest = {"schema": "zetic.hexagon.package/1", "package": {"name": "lfm3-1.7b"},
-                         "target": {"hexagon_arch": 73, "platform": "linux-arm64-qcom"},
+                         "target": {"name": "v73", "hexagon_arch": 73, "platform": "linux-arm64-qcom", "nsp": 2},
                          "capabilities": {"text": True, "image": False, "audio": False},
                          "model": {"repo_id": "LiquidAI/LFM3-1.7B"}, "lm": {"quant": "w4lpbq"}}
         self.save_manifest()
@@ -106,6 +106,36 @@ class RunTests(unittest.TestCase):
     def test_text_package_rejects_media(self):
         image = self.model / "test.ppm"; image.touch()
         self.assertFalse(self.call(image=image)["ok"])
+        self.mock_run.assert_not_called()
+
+    def test_collection_generators_and_capabilities(self):
+        for name, capability in (("lfm3-vl-2b", "image"), ("lfm3-audio-2b", "audio")):
+            with self.subTest(name=name):
+                self.manifest["package"]["name"] = name
+                self.manifest["capabilities"] = {"text": True, capability: True}
+                self.save_manifest()
+                media = self.model / ("test.ppm" if capability == "image" else "test.wav")
+                media.touch()
+                self.mock_run.return_value = subprocess.CompletedProcess(
+                    [], 0, STDOUT, STDERR.replace("loaded lfm3-1.7b", f"loaded {name}"))
+                self.assertTrue(self.call(**{capability: media})["ok"])
+                unsupported = "audio" if capability == "image" else "image"
+                self.mock_run.reset_mock()
+                self.assertFalse(self.call(**{unsupported: media})["ok"])
+                self.mock_run.assert_not_called()
+
+    def test_decision_and_one_nsp_packages_do_not_launch(self):
+        for name in ("d1-2b", "d1-omni-2b"):
+            self.manifest["package"]["name"] = name
+            self.save_manifest()
+            self.assertFalse(self.call()["ok"])
+        self.manifest["package"]["name"] = "lfm3-1.7b"
+        for field, value in (("name", "v73-1nsp"), ("nsp", 1)):
+            original = self.manifest["target"][field]
+            self.manifest["target"][field] = value
+            self.save_manifest()
+            self.assertFalse(self.call()["ok"])
+            self.manifest["target"][field] = original
         self.mock_run.assert_not_called()
 
     def test_omni_audio(self):

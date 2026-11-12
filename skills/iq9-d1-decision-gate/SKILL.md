@@ -8,6 +8,8 @@ metadata:
 
 # d1-2B decision gate
 
+This skill implements the **reference CPU Transformers route**. The [optional ZETIC NPU Decision API](../../examples/zetic-lfm/README.md#optional-zetic-d1-route) uses separate native packages and is not integrated into these Python helpers. Its probabilities need task calibration for that package/runtime; preserve the reference snapshot pin.
+
 d1-2B takes a state (text, JSON, images) and named questions. It returns calibrated, typed answers from one forward pass, with **zero output tokens**. It is not a chat model, and its zero output tokens are **expected**, not an LFM-generation failure. d1 is optional: use a deterministic rule or another decision design when appropriate. Latest dated evidence: [README Developer Notes](../../README.md#developer-notes); detailed API/setup: `docs/decision-models.md` and `examples/system-one-decision/`.
 
 ## Hard rules

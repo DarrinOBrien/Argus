@@ -1,120 +1,59 @@
 #!/usr/bin/env python3
-"""Start GenieX on the NPU for LFM3-1.7B and send one capped chat request.
+"""Send a capped, validated LFM3-1.7B request to an existing GenieX NPU server.
 
-Standard library only. The model must already be in the GenieX cache (see docs/developer-guide.md
-section 4: copy/import from the USB model drive first). This script downloads nothing.
-
-    python serve_lfm_npu.py
-    python serve_lfm_npu.py --prompt "Say hello in five words." --max-tokens 64
-    python serve_lfm_npu.py --keep-running    # leave geniex serve up afterwards
+Start skills/iq9-geniex-lfm/scripts/serve.sh run in a separate board terminal first.
+This example never starts/stops servers, installs software, or downloads models.
 """
 
 import argparse
 import json
-import subprocess
+import math
+from pathlib import Path
 import sys
 import time
-import urllib.error
-import urllib.request
 
-MODEL = "LiquidAI/LFM3-1.7B-GGUF:Q4_0"
-HOST = "127.0.0.1"
-PORT = 18181
-BASE = f"http://{HOST}:{PORT}"
+CLIENT_DIR = Path(__file__).resolve().parents[2] / "skills/iq9-geniex-lfm/scripts"
+sys.path.insert(0, str(CLIENT_DIR))
+from lfm_client import LFM, DEFAULT_MODEL  # noqa: E402
 
 
-def server_up() -> bool:
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--prompt", default="In one sentence, why does on-device inference help when the network is down?")
+    parser.add_argument("--max-tokens", type=int, default=128,
+                        help="positive safety cap, sent as max_completion_tokens")
+    parser.add_argument("--timeout", type=float, default=180, help="seconds per request, including model loading")
+    args = parser.parse_args()
+    if args.max_tokens <= 0:
+        parser.error("--max-tokens must be positive")
+    if not math.isfinite(args.timeout) or args.timeout <= 0:
+        parser.error("--timeout must be finite and positive")
+    if not args.prompt.strip():
+        parser.error("--prompt must not be empty")
+
+    lfm = LFM(model=DEFAULT_MODEL, compute="npu", timeout=args.timeout)
+    if not lfm.ready():
+        print("No GenieX server at 127.0.0.1:18181. In a separate board terminal, run "
+              "bash skills/iq9-geniex-lfm/scripts/serve.sh run from the repo root.", file=sys.stderr)
+        return 2
     try:
-        with urllib.request.urlopen(f"{BASE}/v1/models", timeout=2) as r:
-            return r.status == 200
-    except (urllib.error.URLError, OSError):
-        return False
+        if DEFAULT_MODEL not in lfm.models():
+            print(f"{DEFAULT_MODEL} is not registered. Follow docs/developer-guide.md section 4 "
+                  "(inspect local/USB assets first; copies/imports/downloads need approval).", file=sys.stderr)
+            return 2
+    except (OSError, ValueError, TypeError, KeyError) as exc:
+        print(f"Could not inspect server models: {exc}", file=sys.stderr)
+        return 2
 
-
-def model_cached(model: str) -> bool:
-    """True if `geniex list` shows the repo with the requested precision."""
-    repo, _, precision = model.partition(":")
-    out = subprocess.run(["geniex", "list"], capture_output=True, text=True, check=True).stdout
-    for line in out.splitlines():
-        cells = [c.strip() for c in line.split("│")]
-        if len(cells) >= 4 and cells[1] == repo and precision in cells[3].split(","):
-            return True
-    return False
-
-
-def start_server(log_path: str, timeout: float) -> subprocess.Popen:
-    log = open(log_path, "w")
-    proc = subprocess.Popen(["geniex", "serve", "--compute", "npu"], stdout=log, stderr=subprocess.STDOUT)
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        if proc.poll() is not None:
-            sys.exit(f"geniex serve exited with code {proc.returncode}; see {log_path}")
-        if server_up():
-            return proc
-        time.sleep(1)
-    proc.terminate()
-    sys.exit(f"geniex serve did not answer on {BASE} within {timeout:.0f} s; see {log_path}")
-
-
-def chat(prompt: str, max_tokens: int, timeout: float) -> tuple[dict, float]:
-    body = json.dumps({
-        "model": MODEL,
-        "messages": [{"role": "user", "content": prompt}],
-        "max_completion_tokens": max_tokens,  # the chat-endpoint cap
-        "compute": "npu",
-        "stream": False,  # one JSON reply per call; streaming is not the cause of zero-token replies (see README)
-    }).encode()
-    req = urllib.request.Request(f"{BASE}/v1/chat/completions", data=body,
-                                 headers={"Content-Type": "application/json"})
-    t0 = time.perf_counter()
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        data = json.load(r)
-    return data, time.perf_counter() - t0
-
-
-def main() -> None:
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--prompt", default="In one sentence, why does on-device inference help when the network is down?")
-    ap.add_argument("--max-tokens", type=int, default=128,
-                    help="cap on generated tokens, sent as max_completion_tokens")
-    ap.add_argument("--startup-timeout", type=float, default=60.0, help="seconds to wait for geniex serve")
-    ap.add_argument("--keep-running", action="store_true", help="do not stop geniex serve this script started")
-    ap.add_argument("--log", default="geniex-serve.log", help="where geniex serve writes its log")
-    args = ap.parse_args()
-
-    if not model_cached(MODEL):
-        sys.exit(f"{MODEL} is not in the GenieX cache. Stage it first: docs/developer-guide.md section 4 "
-                 "(copy/import from the USB model drive; download only with approval).")
-
-    proc = None
-    if server_up():
-        print(f"reusing geniex serve already listening on {BASE}")
-    else:
-        print("starting geniex serve --compute npu ...")
-        proc = start_server(args.log, args.startup_timeout)
-
-    try:
-        data, wall = chat(args.prompt, args.max_tokens, timeout=180)
-    finally:
-        if proc is not None and not args.keep_running:
-            proc.terminate()
-            proc.wait(timeout=15)
-
-    choice = data["choices"][0]
-    usage = data.get("usage", {})
-    n = usage.get("completion_tokens", 0)
-    print(choice["message"]["content"].strip())
-    print(f"\nfinish_reason={choice['finish_reason']} prompt_tokens={usage.get('prompt_tokens')} "
-          f"completion_tokens={n}")
-    print(f"end-to-end {wall:.2f} s ({n / wall:.1f} tok/s, includes prefill)")
-    if n == 0:
-        print("Zero-token reply. "
-              "Restart geniex serve and vary the prompt (docs/runtimes.md).")
-        sys.exit(2)
-    if choice["finish_reason"] == "length":
-        print("Hit the cap. LFM3-1.7B may include reasoning in the answer; "
-              "raise --max-tokens or make the prompt narrower.")
+    started = time.perf_counter()
+    result = lfm.chat([{"role": "user", "content": args.prompt}],
+                      max_tokens=args.max_tokens, enable_think=False)
+    result["wall_s"] = time.perf_counter() - started
+    if result["ok"] and result["finish"] != "stop":
+        result.update(ok=False, error=f"generation did not finish naturally: {result['finish']}")
+    print(json.dumps(result), flush=True)
+    return 0 if result["ok"] else 2
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

@@ -42,8 +42,8 @@ if [ "$SKIP_LFM" -eq 1 ]; then
 else
   echo "==> 4. One generation (LFM3-1.7B on the NPU)"
   geniex list | grep -q "$LFM" || fail "$LFM is not in the GenieX cache" "geniex pull $LFM:Q4_0"
-  # Reuses a running geniex serve, or starts one and stops it afterwards.
-  (cd "$REPO_ROOT/examples/lfm-server-npu" && python3 serve_lfm_npu.py --max-tokens 48 --log /tmp/geniex-serve-starter.log)
+  # Requires a foreground server in another terminal; never manages shared servers.
+  (cd "$REPO_ROOT/examples/lfm-server-npu" && python3 serve_lfm_npu.py --max-tokens 48)
 fi
 
 echo ""

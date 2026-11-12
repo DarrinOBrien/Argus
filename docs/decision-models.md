@@ -76,6 +76,12 @@ answers = result["answers"]
 
 For an image, pass a Pillow image through `media=[image]` alongside a state or `None`. Image assets can come from local files; a camera is not required. The runnable example also shows batch calls.
 
+### Optional ZETIC NPU decisions
+
+The [ZETIC IQ9 collection](https://huggingface.co/collections/ZETIC-ai/lfm3-and-d1-on-dragonwing-iq9) also publishes native `d1-2B-IQ9` (text/images) and `d1-Omni-2B-IQ9` (text/images/audio) packages. They use **Ixian Hexagon SDK 0.2.1**, `zetic_d1_cli`, and C++ `Decision::systemOne` on the NPU. This is a separate runtime/API and quantized artifact; the Python examples, `--score` calibration path, and reference snapshot pin above remain CPU Transformers.
+
+See [collection coverage and integration boundaries](../examples/zetic-lfm/README.md#optional-zetic-d1-route) before choosing this route. The vendor documents at most 16 questions and a 1,024-token budget per decision pass, including state/media/questions; do not carry the upstream Transformers context limit into this runtime. Calibrate the chosen package on the app's own data, validate results/device evidence, and apply action policy in code. This repo has not board-verified the ZETIC d1 route.
+
 ## Model files and disk
 
 | Item | Approximate size | Local path |

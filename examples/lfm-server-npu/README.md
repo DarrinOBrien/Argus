@@ -1,6 +1,6 @@
 # Example: GenieX on the NPU with LFM3-1.7B
 
-Starts `geniex serve --compute npu`, sends one capped chat request to LFM3-1.7B, prints the reply and token counts, and stops the server it started. Standard library only, so no venv is needed.
+Sends a capped chat request to LFM3-1.7B through an existing GenieX NPU server. It uses the shared validated LFM client and prints a JSON result. Standard library only, so no venv is needed. Server lifecycle stays in a separate terminal; this example never starts or stops a server.
 
 Script: [`serve_lfm_npu.py`](serve_lfm_npu.py)
 
@@ -47,76 +47,54 @@ geniex config get chipset   # Dragonwing IQ-9075 EVK
 
 ## Run
 
+On the board, from the repo root, start the foreground server in a separate terminal (or reuse an appropriate existing server):
+
 ```bash
-python3 serve_lfm_npu.py
-python3 serve_lfm_npu.py --prompt "Say hello in five words." --max-tokens 64
-python3 serve_lfm_npu.py --keep-running             # leave geniex serve up afterwards
+bash skills/iq9-geniex-lfm/scripts/serve.sh run
 ```
+
+In another board terminal, from the repo root:
+
+```bash
+python3 examples/lfm-server-npu/serve_lfm_npu.py
+python3 examples/lfm-server-npu/serve_lfm_npu.py --prompt "Say hello in five words." --max-tokens 64
+skills/iq9-geniex-lfm/scripts/serve.sh status
+```
+
+Check the answer and confirm `HTP0` in the current server's log after the request. A token count or HTTP success alone does not verify useful output or NPU execution.
 
 | Option | Default | Meaning |
 |---|---|---|
-| `--prompt` | a one-sentence question about on-device inference | user message |
-| `--max-tokens` | 128 | cap on generated tokens, sent as `max_completion_tokens` |
-| `--startup-timeout` | 60 | seconds to wait for `geniex serve` to answer |
-| `--keep-running` | off | do not stop a server this script started |
-| `--log` | `geniex-serve.log` | where `geniex serve` writes its log (in the current directory) |
+| `--prompt` | a one-sentence question about on-device inference | nonempty user message |
+| `--max-tokens` | 128 | positive cap sent as `max_completion_tokens` |
+| `--timeout` | 180 | seconds per request, including any model loading |
 
-## What it does
+## What it checks
 
-1. Checks `geniex list` for the model and precision. If the model is missing, exits and points to [Stage your model](../../docs/developer-guide.md#4-stage-your-model).
-2. Checks whether `127.0.0.1:18181` already answers. If it does, reuses that server. If not, starts `geniex serve --compute npu` and polls `/v1/models` until it answers, up to `--startup-timeout` seconds.
-3. Sends one non-streamed `POST /v1/chat/completions` with `compute: npu`, `max_completion_tokens` set from `--max-tokens`, and `stream: false`.
-4. Prints the reply, `finish_reason`, prompt and completion token counts, and end-to-end tokens per second. Warns when the reply hit the cap.
-5. Stops the server it started, including when the request fails, unless `--keep-running` is set. It never stops a server it reused.
+The script checks server readiness and exact model registration, then calls the shared [LFM client](../../skills/iq9-geniex-lfm/scripts/lfm_client.py) with `compute: npu`, `stream: false`, and `enable_think: false`. The client rejects missing/zero usage and empty answers, and retries unusable output at most once with a fresh tag. Reasoning in a separate field does not count as an answer. The sample also rejects a response that did not finish naturally (`finish_reason != stop`).
 
-## Why a Python script
+Exit **0** means the output guards passed; **2** means a readiness, registration, request, or output failure. Invalid arguments also exit 2 before any request. The JSON includes `ok`, `text`, `tokens`, `finish`, `retried`, `error`, and timing. `ms` describes the final attempt; `wall_s` includes both attempts when retried. Neither is pure decode speed or an answer-quality evaluation.
 
-One request is one HTTP call, so a shell version works for a quick check:
+The old `--keep-running`, `--startup-timeout`, and server `--log` options were removed. Start/stop the owned server explicitly with `serve.sh`; the GenieX launcher PID is not a reliable server PID. Do not interrupt a shared server. No install, import, or download happens here.
 
-```bash
-geniex serve --compute npu > serve.log 2>&1 &
-for i in $(seq 1 60); do curl -s -o /dev/null http://127.0.0.1:18181/v1/models && break; sleep 1; done
-curl -s http://127.0.0.1:18181/v1/chat/completions -H "Content-Type: application/json" \
-  -d '{"model":"LiquidAI/LFM3-1.7B-GGUF:Q4_0","messages":[{"role":"user","content":"Say hi."}],"max_completion_tokens":32,"compute":"npu","stream":false}'
-# stop the process that holds the port; kill $! does not reach the server
-kill "$(ss -ltnp | sed -n 's/.*127.0.0.1:18181.*pid=\([0-9]*\).*/\1/p')"
-```
+## Timing and offline status
 
-The script exists for the parts that shell gets wrong or leaves out:
+The first request after a model unload includes loading. Repeat the command while the model remains resident to observe warm requests; `serve.sh run` defaults to a 1,800-second keepalive. See [server lifecycle](../../docs/runtimes.md#server-lifecycle-model-loading-and-idle-unloading).
 
-- **Cleanup.** `$!` is the launcher, not the server. In our test, `kill $!` left the server running and answering on the port. The script stops the process it started in a `finally` block. We tested the normal path, which left no server running. We have not tested a failed request.
-- **Readiness with a timeout.** It polls until the server answers, fails with the log path if the server exits or doesn't answer in time, and never waits forever.
-- **Reuse.** If a server is already on the port, it uses that server and doesn't start a second one.
-- **Request fields that are easy to get wrong.** Use `max_completion_tokens`, `stream: false` for one JSON reply, and `compute: npu` on every request.
-- **Output that matches this model.** The reply usually contains reasoning, so the script prints token counts and warns when the cap is hit.
-
-Use the shell version for a one-off check. Use the script for runs you repeat or that have to clean up after themselves.
-
-## Expected output
-
-The script prints the reply, then a summary line:
-
-```
-finish_reason=<stop|length> prompt_tokens=<n> completion_tokens=<n>
-end-to-end <s> s (<tok/s> tok/s, includes prefill)
-```
-
-`finish_reason=length` means the cap was hit; the script warns, because LFM3-1.7B may spend the budget on reasoning. A zero-token reply prints a warning and exits with code 2.
-
-## Things to know
-
-- **Use `max_completion_tokens` on chat.** It takes precedence over `max_tokens` if both are set.
-- **Inspect LFM3 output on the board.** Keep the cap low and check `finish_reason` before raising it.
-- **Unusable replies.** A reply can be empty or report zero tokens. The script detects zero tokens, prints a warning, and exits with code 2; if it persists, restart `geniex serve`. See [`docs/runtimes.md`](../../docs/runtimes.md#handling-unusable-output).
-- **Cold start.** The script starts the server, so its first request includes the model load. To see warm timing, run it with `--keep-running`, then run it again. The second run reuses the server. The server unloads the model after 300 s idle by default. See [`docs/runtimes.md`](../../docs/runtimes.md#server-lifecycle-model-loading-and-idle-unloading).
-- **`geniex serve` runs on loopback only** (`127.0.0.1:18181`).
+This revised sample has local mocked validation only; a bounded IQ9 check and network-off rehearsal remain unperformed for this revision. Record actual board/runtime/model/precision, workload, sample counts, successful/failed runs, and medians before reporting performance. See [offline readiness](../../docs/offline-readiness.md).
 
 ## Troubleshooting
 
-| Symptom | Fix |
+| Symptom | Next step |
 |---|---|
-| `... is not in the GenieX cache` | [Stage the model](../../docs/developer-guide.md#4-stage-your-model): USB copy/import first, approved download only as a fallback |
-| `geniex serve exited with code ...` | Read the log (default `geniex-serve.log`) |
-| `did not answer ... within 60 s` | Raise `--startup-timeout`; the first load can take a while |
-| Reply is empty or cut off | Raise `--max-tokens`; check `finish_reason` |
-| `geniex: command not found` | Put `~/.local/bin` on the PATH |
+| No server | Start the foreground server in a separate board terminal; inspect its log |
+| Model is not registered | Inspect board/local/USB assets, then obtain approval for needed staging |
+| Empty or reasoning-only answer after retry | Inspect the returned error and current log; narrow the prompt or adjust the cap before another bounded attempt |
+| `finish=length` | The cap was hit; inspect reasoning/output, then choose a suitable cap for the workload |
+| Missing `HTP0` | Diagnose device access and current-server logs; do not assume CPU fallback |
+
+## Local checks
+
+```bash
+python3 -m unittest discover -s examples/lfm-server-npu -p 'test_*.py' -v
+```

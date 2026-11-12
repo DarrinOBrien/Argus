@@ -211,13 +211,13 @@ Budget disk, host RAM, and device buffers separately. Inspect `df -h /` and `fre
 
 **GenieX remains the reference Python/server path.** ZETIC is a complementary option for hackathon projects needing a different model/input route, particularly when the selected GenieX build lacks the required audio/Omni projector support. Our IQ9 checks produced useful LFM3-1.7B text and LFM3-Omni-2B text, image, and WAV-transcription results using ZETIC's own Hexagon runtime.
 
-The [ZETIC example](../examples/zetic-lfm/README.md) keeps this small: a prebuilt SDK CLI, local files, and a capped Python wrapper. It needs separate **v73 packages**, not GGUFs imported into GenieX. Arrange SDK/model access and stage only needed assets with approval; model access is gated at the time of our check.
+The [ZETIC example](../examples/zetic-lfm/README.md) keeps this small: the prebuilt **Ixian Hexagon SDK 0.2.1** CLI, local files, and a capped Python wrapper. It covers the collection's four LFM3 generators for text/image/WAV → text as applicable, using separate two-NSP **v73 packages**, not GGUFs imported into GenieX. The six IQ9 model repositories are public and ungated at the time of review; stage only needed assets with approval. The older apps guide still refers to a separate gated monolithic repository.
 
-**Upstream resources:** [ZETIC's LFM3 and d1 on Dragonwing IQ9 collection](https://huggingface.co/collections/ZETIC-ai/lfm3-and-d1-on-dragonwing-iq9) for model packages, and [ZETIC's SDK and sample apps](https://github.com/zetic-ai/LFM3-zetic-apps) for runtime assets and vendor examples. Our example's staging commands retain the specific revisions tested on this board.
+**Upstream resources:** [ZETIC's LFM3 and d1 on Dragonwing IQ9 collection](https://huggingface.co/collections/ZETIC-ai/lfm3-and-d1-on-dragonwing-iq9) for model packages, [Ixian Hexagon SDK releases](https://github.com/zetic-ai/IxianHexagon/releases) for runtime assets, and [ZETIC sample apps](https://github.com/zetic-ai/LFM3-zetic-apps) for fixtures. Our example pins the SDK release and inspected model revisions; those current revisions have not been tested on our board.
 
 The trade-off is integration: the one-shot CLI reloads per invocation, while GenieX's resident server is convenient for repeated Python calls. ZETIC's C++ SDK can keep a model loaded, but a resident integration is not implemented here. Its current-request device logs identify **Hexagon v73/two NSPs**, rather than GenieX's `HTP0`; CPU work remains, so do not call it entirely-NPU execution. Retain output caps, answer checks, and code-side action policy whichever runtime you choose.
 
-See the example for measured, workload-specific timing and its verified scope. **Connected-board checks are not a network-off rehearsal.** Video, speech generation, tools, and ZETIC d1 are outside this example; the reference d1 route is unchanged.
+See the example for historical SDK 0.1.0 timing and its verified scope. **Connected-board checks are not a network-off rehearsal.** Video, speech generation, and tools are outside the wrapper. The collection's d1/d1-Omni packages use the vendor's separate native Decision API; see [decision routes](decision-models.md#optional-zetic-npu-decisions). The reference CPU d1 route and snapshot pin are unchanged.
 
 ## 3. Setup
 

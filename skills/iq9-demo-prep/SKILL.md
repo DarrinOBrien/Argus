@@ -31,6 +31,8 @@ Then tie it to the architecture: what the local rule, optional d1 gate, or other
 
 ## 2. Numbers (measure them; never quote the docs as your own)
 
+The collector below measures **GenieX HTTP**, not ZETIC. For ZETIC use the [wrapper's JSONL timings](../../examples/zetic-lfm/README.md#measurements-and-verified-scope), separating CLI wall time/model loading from runtime-reported generation TTFT/decode. Report SDK/package revisions, precision, successful/attempted counts, and medians for the app's own workload. Historical SDK 0.1.0 measurements do not verify Ixian 0.2.1 or its new packages.
+
 ```bash
 # Separate terminal, from the repo root:
 skills/iq9-geniex-lfm/scripts/serve.sh run
@@ -78,6 +80,6 @@ Keep a visible timer, a recorded backup video, and a recorded log ready.
 - [ ] Preflight shows no FAIL for the app's selected profile/model (`reference`, `generator`, or `board`); the app also passes its end-to-end smoke test.
 - [ ] The `iq9-offline-rehearsal` network-off run is done, and its evidence is saved.
 - [ ] Display/control path is rehearsed: monitor setups require removing/rolling back the current Adreno APT update with approval; SSH is unaffected. For a headless USB-C SSH/web UI setup, verify the isolated link, local browser assets, and no laptop internet sharing/forwarding after the cut. See [Developer Notes](../../README.md#external-monitors-and-headless-setups) and [USB-C access](../../docs/offline-readiness.md#display-and-usb-c-access).
-- [ ] Run a visible foreground server with a keepalive covering quiet gaps (`serve.sh run` defaults to 1800 s); verify a usable capped warm-up and HTP0 before showing metrics.
+- [ ] For GenieX, run a visible foreground server with a keepalive covering quiet gaps (`serve.sh run` defaults to 1800 s); verify a usable capped warm-up and HTP0 before showing metrics. For ZETIC, use `--profile board` plus local SDK/package checks and a capped useful request with current-request Hexagon evidence; the one-shot CLI has no server/keepalive.
 - [ ] Use unique initial raw prompts and validate answer/tool content. Know how to safely relaunch the owned foreground server; do not interrupt a shared one or silently detach it.
 - [ ] Read the licence for every model shown. LFM3-1.7B and d1-2B use the LFM Open License v1.0.
