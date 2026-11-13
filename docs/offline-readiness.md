@@ -73,7 +73,7 @@ Review each finding and the dependencies it cannot inspect. A static scan is not
 
 ## Display and USB-C access
 
-- **At the event:** the venue Wi-Fi is switched off for the showcase, and SSH over that Wi-Fi goes with it. Set up and test your control path while Wi-Fi is still on: the USB-C link below, or the micro-USB UART console you used for setup, which needs no network.
+- **At the event:** you turn the board's Wi-Fi off in front of the judge with `sudo nmcli radio wifi off` ([demo format](judging.md#demo-format)), and organizers review submitted code for calls that leave the board. They may also switch off the venue Wi-Fi. When Wi-Fi goes off, SSH over it goes too, so set up and test your control path while Wi-Fi is still on: the USB-C link below, or the micro-USB UART console you used for setup, which needs no network.
 - **External monitor:** read the [monitor issue](../README.md#external-monitors-and-headless-setups) first, and test the display before the cut.
 - **Headless SSH/web UI:** SSH is not affected by the monitor issue. A configured **USB-C network link** between a laptop and the board is allowed for local control and an app web UI during the network-off demo. A USB-C cable alone does not establish networking; stage and test the link and SSH while the external network is still available.
 - **Keep it isolated:** disable laptop internet sharing, bridging, and forwarding to external networks; disconnect/disable external uplinks and verify that neither the app nor the board can reach internet services through the laptop. The browser must use local UI assets, not CDNs or cloud APIs. All inference stays on the board.

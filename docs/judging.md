@@ -8,7 +8,7 @@ Submit between **8:00 and 8:30 p.m. Pacific on November 13, 2026** through the [
 
 Your submission must include **both**:
 
-- A link to your project's **GitHub repository**. Fork this repo and build under [`apps/`](../apps/README.md), or use a repository of your own; either works. The judges need to be able to open it.
+- A link to your project's **GitHub repository**. Fork this repo and build under [`apps/`](../apps/README.md), or use a repository of your own; either works. Make it **public**: judges open it, and organizers review the code for anything that calls a service outside the board.
 - A link to your project on the **[Arduino Project Hub](https://projecthub.arduino.cc/)**. Post your entire project there, the write-up and the code, not only a link back to GitHub. Posting needs an Arduino account, so sign in before the window opens.
 
 Have both links ready before 8:00 p.m.
@@ -33,7 +33,16 @@ Prepare an answer that names a specific constraint. Examples: the network is una
 ## Demo format
 
 - Two minutes per team, plus one judge question.
-- External network access is removed for the final demo. The core workflow must keep running offline. An isolated USB-C link for SSH and a board-hosted app web UI is allowed, with no laptop internet sharing/forwarding; see [display and USB-C access](offline-readiness.md#display-and-usb-c-access).
+- **Turn the board's Wi-Fi off in front of the judge**, unplug any Ethernet cable, then run the core workflow:
+
+  ```bash
+  # board shell, from the UART console or a USB-C link
+  sudo nmcli radio wifi off
+  nmcli -p device              # show the judge that Wi-Fi is no longer connected
+  ```
+
+  Run it from a session that does not depend on Wi-Fi. Over SSH on Wi-Fi, the command ends your own session; the micro-USB UART console you used for setup needs no network. `sudo nmcli radio wifi on` restores Wi-Fi afterwards. Rehearse this once before judging.
+- The core workflow must keep running offline. An isolated USB-C link for SSH and a board-hosted app web UI is allowed, with no laptop internet sharing/forwarding; see [display and USB-C access](offline-readiness.md#display-and-usb-c-access). Organizers may also switch off the venue Wi-Fi.
 - Show local inputs, decisions, executed actions, and errors from the app's log.
 - Prepare a visible timer, local sample data, and a backup recording.
 

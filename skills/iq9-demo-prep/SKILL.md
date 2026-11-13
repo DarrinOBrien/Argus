@@ -68,7 +68,7 @@ Write numbers into the app's README with the board, date, GenieX version, actual
 | Time | Show |
 |---|---|
 | 0:00–0:20 | The user, their problem, and the constraint (from step 1) |
-| 0:20–0:35 | **Disconnect external uplinks on stage**, then show an external `curl` failing; an isolated USB-C SSH/web UI link may remain, without laptop internet sharing/forwarding |
+| 0:20–0:35 | **Turn the board's Wi-Fi off in front of the judge**: `sudo nmcli radio wifi off` from the UART console or a USB-C link, never from SSH over Wi-Fi, and unplug any Ethernet cable. Then show an external `curl` failing; an isolated USB-C SSH/web UI link may remain, without laptop internet sharing/forwarding |
 | 0:35–1:30 | The loop running live: an input changes, the local decision runs, the action fires, the one-sentence explanation appears |
 | 1:30–1:50 | The local JSONL log scrolling (the proof) plus 2–3 numbers from `metrics.json` |
 | 1:50–2:00 | The next step for a real deployment |
