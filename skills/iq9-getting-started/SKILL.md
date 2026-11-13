@@ -36,7 +36,7 @@ Check [board-side DNS and bounded HTTPS](../../docs/developer-guide.md#03-check-
 
 Ask before network changes. Preserve the current control connection; use a tested UART/local fallback and restoration plan before changing an interface carrying SSH. Do not enable laptop internet sharing/forwarding by default. Approved online staging is separate from the later isolated demo.
 
-When possible, [test SSH](../../docs/developer-guide.md#04-move-to-ssh-and-setup) using the board address observed through UART and the event account. Keep host-key checks enabled; confirm changed keys with the board/owner before approved known-hosts changes. If client isolation blocks SSH, ask organizers for a supported connection rather than scanning the network or weakening security.
+When possible, [test SSH](../../docs/developer-guide.md#04-move-to-ssh-and-setup) using the board address observed through UART and the event account. Keep host-key checks enabled; confirm why a key changed (a reflash changes it) before removing a known-hosts entry. If client isolation blocks SSH, ask organizers for a supported connection rather than scanning the network or weakening security.
 
 **Checkpoint:** report the available control path and source-specific setup connectivity. If internet is unavailable but all needed assets are local, explain that setup may proceed locally; otherwise report staging as blocked.
 
@@ -54,9 +54,9 @@ ssh "$IQ9_HOST" 'bash -s -- --profile board --json' < skills/iq9-preflight/scrip
 
 The SSH form does not require a board-side repo copy, and neither do the other one-shot helpers. Run them from the laptop as shown in [driving the board from the laptop](../../docs/developer-guide.md#05-drive-the-board-from-the-laptop-no-repo-copy), labelling every command as **laptop** or **board**. For the long-running server or importable helpers, copy only the needed files to a board work directory with approval; a full repo copy is optional and also needs approval, checking resolved destinations and preserving existing files. If using UART without the repo on the board, report preflight as unperformed until files are available; use the guide's basic board checks in the meantime.
 
-Inspect existing package/runtime versions and permissions, local model directories, disk, memory, and shared servers. Run `geniex version`, `geniex list`, and chipset configuration checks **if GenieX is available**; otherwise note it as missing and inspect local files first. Missing weights/GenieX are expected setup gaps, not proof that flashing failed. The always-emitted display warning is a reminder, not a detected monitor failure.
+Inspect existing package/runtime versions and permissions, local model directories, disk, memory, and running servers. Run `geniex version`, `geniex list`, and chipset configuration checks **if GenieX is available**; otherwise note it as missing and inspect local files first. Missing weights/GenieX are expected setup gaps, not proof that flashing failed. The always-emitted display warning is a reminder, not a detected monitor failure.
 
-If a chosen model is missing from board storage, inspect the participant-confirmed USB drive before considering a download. Follow [USB model staging](../../docs/developer-guide.md#usb-model-drive-copy-never-move): discover existing mounts, identify the compatible model and full asset set, inspect source/destination paths and symlinks, and obtain approval for the copy/import. **Copy, never move; leave every source file intact.** Ask before mounting an unmounted drive or changing system configuration. If the drive is on the laptop, plan an approved copy over the confirmed SSH link rather than assuming the board can see that mount.
+If the chosen model is missing from board storage, use the supplied USB drive before considering a download. Follow [USB model staging](../../docs/developer-guide.md#usb-model-drive-copy-never-move): find the mount, pick the one model directory, and get approval for the import. **Copy, never move.** If the drive is in the laptop, plan a copy over SSH; the board cannot see that mount.
 
 Present a short plan listing:
 
@@ -71,9 +71,9 @@ Wait for approval before installations/upgrades, model downloads/imports/removal
 
 Use [developer guide sections 3–4](../../docs/developer-guide.md#3-setup) for missing base/NPU packages, GenieX, and the reference generator assets. Review installers before running them. Reuse compatible installations and local weights; inspect the cache again after installing GenieX and never re-pull registered models. Back up replaced board files and preserve unrelated files. Do not silently switch compute routes or upgrade to a different runtime version.
 
-Run long setup, copy/import, and server jobs in a separate terminal. Retain logs and verify each exit status. Do not move an existing shared server into a new runner without approval.
+Run long setup, copy/import, and server jobs in a separate terminal. Retain logs and verify each exit status.
 
-Before an approved APT install, refresh the **existing** sources and simulate the actual missing-package list; review dependencies, versions, upgrades, and removals before accepting the real install. If package downloads return `404 Not Found`, check for stale lists and follow [stale APT recovery](../../docs/developer-guide.md#stale-apt-lists-and-package-file-404s). Do not use `--fix-missing`, add a PPA, upgrade the system, or change Adreno to work around stale package URLs. If sudo requires a password, have the participant run the privileged command privately in their board terminal; do not put passwords in chat or logged commands.
+Before an APT install, refresh the **existing** sources, simulate the missing-package list, and review it. For `404 Not Found` package downloads, follow [stale APT recovery](../../docs/developer-guide.md#stale-apt-lists-and-package-file-404s); do not add a PPA, upgrade the system, use `--fix-missing`, or change Adreno. The participant runs sudo commands in their own board terminal.
 
 Report the refreshed APT candidate, the installed package version, and GenieX's bundled runtime (`geniex version`) separately. They can differ and are not interchangeable; see the [stale APT note](../../docs/developer-guide.md#stale-apt-lists-and-package-file-404s).
 
@@ -89,7 +89,7 @@ Read the [generator skill](../iq9-geniex-lfm/SKILL.md). On the board, from the r
 bash skills/iq9-preflight/scripts/preflight.sh --profile generator --json
 ```
 
-Reuse an appropriate existing server, or start `skills/iq9-geniex-lfm/scripts/serve.sh run` in an agreed separate terminal. Do not interrupt a shared server. Use the existing standard-library client for a bounded first response:
+Reuse an appropriate existing server, or start `skills/iq9-geniex-lfm/scripts/serve.sh run` in an agreed separate terminal. Do not stop a server you did not start. Use the existing standard-library client for a bounded first response:
 
 ```bash
 python3 skills/iq9-geniex-lfm/scripts/lfm_client.py --sentence 'Explain why local inference is useful when the internet is unavailable.'
@@ -108,5 +108,5 @@ Summarize observed facts, failed checks, and unperformed checks:
 - Runtime version, model/precision, usable response, and current-server NPU evidence.
 - Installed/staged changes, unresolved blockers, and server/log location.
 - d1 status (usually intentionally skipped).
-- Next example: generator requests or guarded tool calling; an always-on design if it fits the project.
+- Next example: generator requests, guarded tool calling, or the always-on agent (`--gate rule` needs no d1).
 - Offline status: local inference while connected is **not** a network-off rehearsal. Do not cut networking to complete onboarding; follow the [offline skill](../iq9-offline-rehearsal/SKILL.md) later with explicit approval and a tested fallback/restoration plan.

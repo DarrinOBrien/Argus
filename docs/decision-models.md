@@ -118,6 +118,6 @@ Inspect precision, recall, false positives, and missed alerts against the app's 
 
 ## Safety and licensing
 
-`trust_remote_code=True` executes Python from the snapshot. Review that code before loading it and keep the revision pin unchanged unless the board owner approves a new version.
+`trust_remote_code=True` executes Python from the snapshot. Review that code before loading it and keep the revision pin unchanged unless the team approves a new version.
 
 The model's probability does not authorize an action. Validate typed answers, apply policy in code, and execute only allowlisted actions. Read the model's LICENSE before publishing or commercializing an app.

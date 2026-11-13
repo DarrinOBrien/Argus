@@ -13,7 +13,7 @@ Use `geniex version` and `geniex --help` to inspect the installed runtime. Do no
 | Transformers | Local safetensors snapshot and model code | CPU for d1-2B | Optional decision gate |
 | ZETIC Ixian Hexagon SDK 0.2.1 | Public IQ9 packages, not GGUF | Hexagon v73 plus CPU work; LFM3 also offers `v73-1nsp` | [LFM3 text/image/audio → text wrapper and separate native d1 guidance](../examples/zetic-lfm/README.md) |
 
-ZETIC is separate from GenieX's CLI, cache, and HTTP APIs. Its example uses a prebuilt one-shot CLI, restricted to two-NSP `v73` generators, and does not change the reference stack; see [why it is included](developer-guide.md#25-optional-zetic-route). The current Ixian SDK/packages have not been board-verified here; older SDK 0.1.0 checks do not validate this update. ZETIC d1 uses its native `Decision` API, not the generator wrapper or CPU snapshot. The rest of this page's server endpoints/flags describe GenieX.
+ZETIC is separate from GenieX's CLI, cache, and HTTP APIs. Its example uses a prebuilt one-shot CLI, restricted to two-NSP `v73` generators, and does not change the reference stack; see [why it is included](developer-guide.md#25-optional-zetic-route). SDK 0.2.1 and the current packages have been run on the IQ-9075; the example's timing table is from SDK 0.1.0. ZETIC d1 uses its native `Decision` API, not the generator wrapper or CPU snapshot. The rest of this page's server endpoints/flags describe GenieX.
 
 ## Model format and precision
 
@@ -38,7 +38,7 @@ The optional d1-2B gate uses a pinned local Transformers snapshot, not a GGUF. S
 | `geniex model set-type <model> llm\|vlm` | Set model modality | Use the matching assets and client for vision models |
 | `geniex infer <model> --compute npu` | Interactive exploration | Use capped HTTP requests for scripted calls |
 | `geniex serve --compute npu --keepalive 1800 --log info` | Run an OpenAI-compatible server | Reference address: `127.0.0.1:18181`; no model downloads |
-| `geniex remove <model>[:<precision>]` | Delete cached assets | Destructive; ask the board owner first |
+| `geniex remove <model>[:<precision>]` | Delete cached assets | Destructive; ask first |
 | `geniex clean` | Delete all cached models | Destructive; not a routine troubleshooting step |
 
 ## Local server
@@ -51,7 +51,7 @@ bash skills/iq9-geniex-lfm/scripts/serve.sh run
 
 Keep the server visible and use another terminal for requests and diagnostics. Do not bind to a non-loopback address without approval.
 
-The helper defaults to NPU compute, a 1800-second keepalive, and `./geniex-serve.log`. In another terminal, `serve.sh status` reports the listener, model IDs, and device-log excerpt. Stop only a server you can safely interrupt.
+The helper defaults to NPU compute, a 1800-second keepalive, and `~/geniex-serve.log`. From any directory, `serve.sh status` reports the listener, model IDs, and the device line from that log, and says so when the log or the line is missing. Stop only a server you can safely interrupt.
 
 ## Server endpoints
 

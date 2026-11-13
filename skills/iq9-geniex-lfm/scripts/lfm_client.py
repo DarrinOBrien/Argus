@@ -115,13 +115,13 @@ class LFM:
 
         return self._with_retry(lambda: parse(*self._post("/v1/completions", body)), tag, retry_zero)
 
-    def sentence(self, user, system=DEFAULT_SYSTEM, max_tokens=80, close_think=True, model=None):
+    def sentence(self, user, system=DEFAULT_SYSTEM, max_tokens=80, close_think=True, model=None, unique=True):
         """One direct sentence from a raw ChatML completion. close_think=True closes LFM3's
-        default reasoning block."""
+        default reasoning block. unique=False is for repeated-prompt diagnostics only."""
         prompt = _TEMPLATE.replace("{SYSTEM}", system).replace("{USER}", user)
         if close_think:
             prompt += _CLOSED_THINK
-        return self.complete(prompt, max_tokens=max_tokens, model=model)
+        return self.complete(prompt, max_tokens=max_tokens, model=model, unique=unique)
 
     # ---- internals --------------------------------------------------------------------------------
 

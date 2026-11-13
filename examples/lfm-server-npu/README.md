@@ -13,7 +13,7 @@ Script: [`serve_lfm_npu.py`](serve_lfm_npu.py)
   geniex list                                  # look for LiquidAI/LFM3-1.7B-GGUF  Q4_0
   ```
 
-  If it is missing, follow [Stage your model](../../docs/developer-guide.md#4-stage-your-model). Copy/import it from the supplied USB model drive first (copy, never move); download only with approval if no local copy exists.
+  If it is missing, follow [Stage your model](../../docs/developer-guide.md#4-stage-your-model). Import it from the supplied USB model drive, or download it if there is no local copy.
 - Python 3.
 
 <a id="install-geniex"></a>
@@ -27,7 +27,7 @@ This example has no setup recipe of its own. Follow the [developer guide](../../
 3. **NPU access.** Check read **and** write on the CDSP nodes; see [NPU device access](../../docs/developer-guide.md#npu-device-access).
 4. **GenieX v0.10.0** ([section 3.3](../../docs/developer-guide.md#33-geniex-cli)). Download the installer, read it, then run it with `--version v0.10.0`. Do not pipe it straight into `sh`.
 
-Out of scope here: Adreno/graphics packages, broad `apt upgrade`, and new package sources. **External monitor warning:** organizers report a GPU-driver issue after the current Adreno APT update; see [Developer Notes](../../README.md#external-monitors-and-headless-setups). SSH is unaffected, and a headless SSH/web UI setup over an isolated USB-C link is allowed ([USB-C access](../../docs/offline-readiness.md#display-and-usb-c-access)).
+Out of scope here: Adreno/graphics packages, broad `apt upgrade`, and new package sources. If you use an external monitor, read the [monitor issue](../../README.md#external-monitors-and-headless-setups) first.
 
 Notes on the GenieX installer:
 
@@ -75,7 +75,7 @@ The script checks server readiness and exact model registration, then calls the 
 
 Exit **0** means the output guards passed; **2** means a readiness, registration, request, or output failure. Invalid arguments also exit 2 before any request. The JSON includes `ok`, `text`, `tokens`, `finish`, `retried`, `error`, and timing. `ms` describes the final attempt; `wall_s` includes both attempts when retried. Neither is pure decode speed or an answer-quality evaluation.
 
-The old `--keep-running`, `--startup-timeout`, and server `--log` options were removed. Start/stop the owned server explicitly with `serve.sh`; the GenieX launcher PID is not a reliable server PID. Do not interrupt a shared server. No install, import, or download happens here.
+The old `--keep-running`, `--startup-timeout`, and server `--log` options were removed. Start/stop the owned server explicitly with `serve.sh`; the GenieX launcher PID is not a reliable server PID. No install, import, or download happens here.
 
 ## Timing and offline status
 

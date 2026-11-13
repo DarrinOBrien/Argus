@@ -11,7 +11,7 @@ df -h /
 if command -v geniex >/dev/null; then geniex list; fi  # not required for ZETIC
 ```
 
-Inspect existing local model directories as well as the cache. A missing cache entry does not mean the weights are absent. **Ask whether the participant has the supplied USB model drive and USB-C dongle/adapter** before proposing downloads. Follow [USB model staging](developer-guide.md#usb-model-drive-copy-never-move): copy/import the selected assets onto board storage, never move them, and leave the source drive unchanged. Budget for intermediate copies; reuse registered models without re-importing.
+Check local model directories as well as the cache: a missing cache entry does not mean the weights are absent. Use the supplied USB model drive before downloading, following [USB model staging](developer-guide.md#usb-model-drive-copy-never-move). Reuse registered models without re-importing.
 
 For planning, the LFM3-1.7B QAD-Q4_0 weights use about **1.05 GB**; the optional d1-2B Transformers snapshot uses about **3.84 GB**. For another model or precision, use its exact artifact's file list and inspect the local files rather than carrying over these estimates.
 
@@ -21,7 +21,7 @@ Budget for the full set of matching weights, model code, tokenizer, prompt templ
 
 Weight-file size is not runtime RAM usage: host RAM and device buffers are separate budgets. See [Measuring performance](developer-guide.md#10-measuring-performance) for app-level timing and memory checks.
 
-Ask before deleting files or running `geniex remove` or `geniex clean` on a shared board. Do not remove unrelated models or edit cache metadata to free space.
+Ask before deleting files or running `geniex remove` or `geniex clean`. Do not edit cache metadata to free space.
 
 ## Before the network goes down
 
@@ -73,7 +73,8 @@ Review each finding and the dependencies it cannot inspect. A static scan is not
 
 ## Display and USB-C access
 
-- **External monitor:** organizers report that the current Adreno APT update causes a GPU-driver issue. Teams using a monitor must **remove/roll back that update**, confirm the procedure with the organizers and board owner, and test the display before the cut. Do not blindly uninstall GPU packages or reintroduce `qcom-adreno1` via the NPU setup recipes. See [Developer Notes](../README.md#external-monitors-and-headless-setups).
+- **At the event:** the venue Wi-Fi is switched off for the showcase, and SSH over that Wi-Fi goes with it. Set up and test your control path while Wi-Fi is still on: the USB-C link below, or the micro-USB UART console you used for setup, which needs no network.
+- **External monitor:** read the [monitor issue](../README.md#external-monitors-and-headless-setups) first, and test the display before the cut.
 - **Headless SSH/web UI:** SSH is not affected by the monitor issue. A configured **USB-C network link** between a laptop and the board is allowed for local control and an app web UI during the network-off demo. A USB-C cable alone does not establish networking; stage and test the link and SSH while the external network is still available.
 - **Keep it isolated:** disable laptop internet sharing, bridging, and forwarding to external networks; disconnect/disable external uplinks and verify that neither the app nor the board can reach internet services through the laptop. The browser must use local UI assets, not CDNs or cloud APIs. All inference stays on the board.
 
@@ -92,7 +93,7 @@ Get explicit approval before a network cut or reboot. Use a tested local console
 1. Disconnect Ethernet, disable Wi-Fi, and inspect other possible external uplinks, including USB networking. An isolated USB-C control/UI link may remain, but must not provide internet access via the laptop. Inspect routes and laptop sharing/forwarding settings; an external `curl` failure alone does not establish isolation.
 2. Start the generator from a stopped state in a separate terminal, then launch the app using its normal command. For the one-shot ZETIC wrapper, launch the CLI through the wrapper normally; there is no server to restart. A reboot is optional, not required.
 3. Send a capped request and verify usable output and current-request device evidence: the current GenieX server's `HTP0` log, or the ZETIC wrapper's Hexagon v73/two-NSP evidence. ZETIC d1 needs its own Decision API/device checks; the generator wrapper does not validate it. Investigate missing device output rather than assuming CPU fallback.
-4. Run the core workflow for at least 10 minutes, including an event that triggers an explanation or allowlisted action. Exercise local UI assets and input handling too.
+4. Run the core workflow for as long as the schedule allows (10 minutes is a good target; a few minutes is realistic during the event), including an event that triggers an explanation or allowlisted action. Exercise local UI assets and input handling too.
 5. Inspect the app's flushed JSONL for decisions, executed actions, usable explanations, and errors. Check responsiveness and memory for the intended workload.
 6. Restore external networking through the tested local console or isolated USB-C control session when the rehearsal is complete.
 
@@ -102,7 +103,7 @@ Do not use a generic one-interface network-cut script. A scripted cut needs an a
 
 - Keep local sample data, a recorded demo, and a copy of the decision log.
 - Know the normal launch command and where errors are logged.
-- Know how to stop and relaunch the owned foreground server without interrupting another team's work.
+- Know how to stop and relaunch your foreground server.
 - An already-cached alternative model can be an optional fallback; do not download a second stack just for this checklist.
 
 ## Common failures
@@ -112,6 +113,6 @@ Do not use a generic one-interface network-cut script. A scripted cut needs an a
 | Online startup works but offline startup fails | Model paths, install steps, remote assets, dependency network calls | Stage missing assets and remove runtime fetches |
 | Offline reinstall fails | Missing wheels or package-specific runtime files | Stage and exercise recovery before the cut |
 | Generator is slow or device output is missing | Current log, compute configuration, drivers, permissions | Diagnose NPU access; do not silently switch to CPU |
-| No space left on device | Cache, local snapshots, archives, duplicate copies | Ask the owner before removing unused files |
+| No space left on device | Cache, local snapshots, archives, duplicate copies | Ask before removing unused files |
 | Server request fails | Listener, model ID, response body, current server log | Correct configuration or safely relaunch the owned server |
 | Empty LFM answer or zero completion tokens | Answer/reasoning fields, cap, prompt uniqueness | Retry once with a fresh tag; log persistent failure |

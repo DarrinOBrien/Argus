@@ -17,7 +17,7 @@ External sensors are **optional and not provided**. Participants may bring their
 
 ## Display and headless access
 
-Organizers report a GPU-driver issue with external monitors after the current Adreno APT update. If using a monitor, **remove/roll back the Adreno APT update** with the organizers' procedure and board-owner approval; do not install/update `qcom-adreno1` as a generic NPU prerequisite. See [Developer Notes](../README.md#external-monitors-and-headless-setups).
+Organizers report a GPU-driver issue with external monitors after the current Adreno APT update. Read [Developer Notes](../README.md#external-monitors-and-headless-setups) before using a monitor, and do not install or update `qcom-adreno1` for the NPU.
 
 SSH is not affected. A configured, isolated USB-C network link can carry SSH and a board-hosted app web UI during the network-off demo, without laptop internet sharing/forwarding. See [offline access and rehearsal](offline-readiness.md#display-and-usb-c-access).
 
@@ -50,7 +50,7 @@ Start with [board access and internet for setup](developer-guide.md#0-board-acce
 
 These steps adapt the [Qualcomm Ubuntu IQ-9075 setup guide](https://dragonwingdocs.qualcomm.com/Ubuntu/devices/iq9075-evk/set-up-the-device). Flashing, camera pipelines, and model conversion are outside this repository's scope.
 
-Before installing or changing system software, inspect the current setup and obtain approval from the board owner.
+Inspect the current setup before installing or changing system software.
 
 ## Quick checks
 

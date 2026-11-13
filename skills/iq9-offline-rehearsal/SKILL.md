@@ -19,6 +19,7 @@ python3 skills/iq9-offline-rehearsal/scripts/offline_audit.py apps/my-agent
 | Finding | Fix |
 |---|---|
 | `hub-id` (error) | Load from a local path: `~/models/d1-2B`, or the model name in the GenieX cache through `geniex serve` |
+| `local-only` (warn) | Pass `local_files_only=True` to every `from_pretrained()` call |
 | `pull` (error) | Move `geniex pull`, `pip install`, `npm install`, and `apt install` into a setup step that runs before the cut. Never at runtime |
 | `cdn` (error) | Vendor the JS and CSS into the app, and serve them locally |
 | `url` (warn) | Check each non-localhost URL: remove external runtime dependencies or make them optional. An isolated USB-C board address may be local-only; verify its route and prefer SSH forwarding to localhost |
@@ -31,9 +32,9 @@ This is a heuristic static check, not proof of offline operation. Inspect runtim
 
 The GenieX/Transformers steps below apply to the reference stack. For ZETIC, use `preflight.sh --profile board`, then the [Ixian SDK/package staging and validation recipe](../../examples/zetic-lfm/README.md#stage-once-with-approval). No GenieX cache registration, server, or CPU d1 environment is required for a ZETIC-only app. Verify the selected local SDK/package and current-request device evidence; the generator wrapper does not validate native ZETIC d1.
 
-Inspect `geniex list`, existing local model directories, and `df -h /` first. **Ask whether the participant has the supplied USB model drive and USB-C dongle/adapter.** Prefer compatible USB/local assets over network downloads; follow [USB model staging](../../docs/developer-guide.md#usb-model-drive-copy-never-move). Copy/import the selected full asset set onto board storage; **never move files, delete the USB source, or depend on that removable drive at runtime**. Verify the copy and registration, then test startup without the model drive attached after approved safe ejection.
+Check `geniex list`, local model directories, and `df -h /` first. Use the supplied USB drive before downloading, following [USB model staging](../../docs/developer-guide.md#usb-model-drive-copy-never-move): copy, never move. Nothing at runtime may point back to the drive, so test startup with it ejected.
 
-**Ask before every model copy, `geniex pull` (including local imports), `fetch_d1.py`, installation/system change, mount/eject, or deletion**, regardless of size. Never re-pull cached models. Network access is needed only for separately approved missing software/assets, not for USB copies. Run long staging jobs in a separate terminal, retain logs, and verify exit status.
+**Ask before every model copy, `geniex pull` (including local imports), `fetch_d1.py`, installation, mount/eject, or deletion.** Never re-pull cached models. Run long staging jobs in a separate terminal and check their exit status.
 
 - [ ] Run `geniex list` and confirm every model the app uses is cached. Run `geniex version` and confirm v0.10.0.
 - [ ] **If the app uses d1**, confirm `~/models/d1-2B/REVISION` reads `10e7671d44e4…`. Otherwise use `preflight.sh --profile generator --model <cached-name:precision>` (or `--profile board` without a generator). Reference defaults are not mandatory models.
@@ -42,7 +43,7 @@ Inspect `geniex list`, existing local model directories, and `df -h /` first. **
 - [ ] Put sample and recorded data for the demo on the board (in case a sensor fails).
 - [ ] Stage this repo's docs and skills on the board. Back up files being replaced; do not use destructive sync to remove unrelated files.
 - [ ] Stage only the app's needed models/assets. External sensors are optional and not supplied; keep local sample/recorded inputs for any hardware-dependent demo.
-- [ ] Choose and test the display/control path. External monitors require removing/rolling back the current Adreno APT update with the organizers' procedure and owner approval; do not install/update `qcom-adreno1` as a generic NPU fix. SSH is unaffected. See [Developer Notes](../../README.md#external-monitors-and-headless-setups).
+- [ ] Choose and test the display/control path. For an external monitor, read the [monitor issue](../../README.md#external-monitors-and-headless-setups) first; SSH is unaffected.
 - [ ] For headless SSH/web UI, configure and test the isolated USB-C network link and port forwarding before the cut. Disable laptop internet sharing/bridging/forwarding, keep UI assets local and inference on the board, and leave GenieX on loopback. See [USB-C access](../../docs/offline-readiness.md#display-and-usb-c-access).
 
 ## 3. Network-off run (the real test)
@@ -51,7 +52,7 @@ Inspect `geniex list`, existing local model directories, and `df -h /` first. **
 
 1. The user unplugs Ethernet and turns off Wi-Fi. Inspect other external routes and laptop sharing/forwarding settings. Check: `curl -sS -m 5 https://huggingface.co` must fail; that alone is not proof of isolation.
 2. Cold start: for GenieX, with approval, stop the owned generator and run `skills/iq9-geniex-lfm/scripts/serve.sh run` in a separate terminal, then start the app normally. For the one-shot ZETIC wrapper, launch normally from the staged SDK/package; every invocation loads the model afresh. Validate the useful answer, usage and current-request Hexagon evidence. A reboot is optional and needs approval. Do not silently switch a foreground server to a detached restart.
-3. Run the core loop end to end for at least 10 minutes, including at least one alert or action. For a USB-C web UI, exercise the laptop browser with external uplinks cut and confirm local assets load and inference stays on the board.
+3. Run the core loop end to end for as long as the schedule allows (10 minutes is a good target; a few minutes is realistic during the event), including at least one alert or action. For a USB-C web UI, exercise the laptop browser with external uplinks cut and confirm local assets load and inference stays on the board.
 4. Collect evidence: the app's JSONL log, runtime-specific metrics, and a screen or phone recording. Use `skills/iq9-demo-prep/scripts/collect_metrics.sh` for GenieX; for ZETIC use the wrapper's JSONL timings, separating model loading, generation, and wall time. Record successes/failures and sample counts; do not apply the HTTP collector to a native CLI.
 5. Plug the network back in. Record anything that failed in the app's README, along with its fix.
 

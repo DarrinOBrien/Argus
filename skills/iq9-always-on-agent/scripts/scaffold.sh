@@ -3,15 +3,16 @@
 #
 #   scaffold.sh <app-dir>          e.g. scaffold.sh apps/cold-chain-monitor
 #
-# Copies always_on_agent.py, the d1 sensor questions it imports, and the LFM client, rewires the imports
-# so the app is self-contained, and writes a README stub. Refuses to overwrite an existing directory.
+# Copies always_on_agent.py, the LFM client it uses, and the d1 sensor questions (loaded only by --gate d1),
+# rewires the paths so the app is self-contained, and writes a README stub. Refuses to overwrite an
+# existing directory.
 
 set -euo pipefail
 
 SKILL_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 REPO_ROOT="$(cd "$SKILL_DIR/../.." && pwd)"
 DEST="${1:-}"
-case "$DEST" in --help|-h) echo "usage: scaffold.sh <app-dir> (creates a reference d1/LFM app; refuses existing paths)"; exit 0 ;; esac
+case "$DEST" in --help|-h) echo "usage: scaffold.sh <app-dir> (creates a reference always-on app; refuses existing paths)"; exit 0 ;; esac
 [ -n "$DEST" ] || { echo "usage: scaffold.sh <app-dir>" >&2; exit 64; }
 DEST="$(python3 -c 'import os,sys; print(os.path.abspath(sys.argv[1]))' "$DEST")"
 { [ -e "$DEST" ] || [ -L "$DEST" ]; } && { echo "refusing to overwrite $DEST" >&2; exit 1; }
@@ -26,65 +27,69 @@ cp "$SRC_AGENT" "$DEST/agent.py"
 cp "$SRC_CLIENT" "$DEST/lfm_client.py"
 
 # questions.py: just the d1 questions, so the app does not depend on the example directory.
-python3 - "$SRC_QUESTIONS" "$DEST/questions.py" <<'EOF'
+python3 - "$SRC_QUESTIONS" "$DEST/questions.py" <<'PY'
 import ast, sys
 src = open(sys.argv[1]).read()
 tree = ast.parse(src)
 node = next(n for n in tree.body if isinstance(n, ast.Assign) and any(getattr(t, "id", "") == "SENSOR_QUESTIONS" for t in n.targets))
 body = ast.get_source_segment(src, node)
-open(sys.argv[2], "w").write('"""d1 questions for this app. Edit them, then recalibrate the threshold."""\n\n' + body + "\n")
-EOF
+open(sys.argv[2], "w").write('"""d1 questions for this app (--gate d1). Edit them, then recalibrate the threshold."""\n\n' + body + "\n")
+PY
 
-# Rewire the import: the example reaches into ../system-one-decision.
-python3 - "$DEST/agent.py" <<'EOF'
+# Rewire the two helper paths: the example reaches into the skills and system-one-decision directories.
+python3 - "$DEST/agent.py" <<'PY'
 import sys
 p = sys.argv[1]
 s = open(p).read()
-old_path = 'sys.path.insert(0, os.path.join(HERE, "..", "system-one-decision"))\n'
-old_imp = "from system_one_example import SENSOR_QUESTIONS  # noqa: E402  (alert, category, severity)"
-assert old_path in s and old_imp in s, "always_on_agent.py changed; update scaffold.sh"
-s = s.replace(old_path, "sys.path.insert(0, HERE)\n")
-s = s.replace(old_imp, "from questions import SENSOR_QUESTIONS  # noqa: E402  (edit questions.py)")
+old_note = "# scaffold.sh copies both helpers next to the app and rewrites these two lines.\n"
+old_client = 'LFM_CLIENT_DIR = os.path.join(HERE, "..", "..", "skills", "iq9-geniex-lfm", "scripts")\n'
+old_questions = 'D1_QUESTIONS = (os.path.join(HERE, "..", "system-one-decision"), "system_one_example")\n'
+assert old_note in s and old_client in s and old_questions in s, "always_on_agent.py changed; update scaffold.sh"
+s = s.replace(old_note, "# lfm_client.py and questions.py sit next to this file.\n")
+s = s.replace(old_client, "LFM_CLIENT_DIR = HERE\n")
+s = s.replace(old_questions, 'D1_QUESTIONS = (HERE, "questions")\n')
 open(p, "w").write(s)
-EOF
+PY
 
 NAME="$(basename "$DEST")"
 cat > "$DEST/README.md" <<EOF
 # $NAME
 
-Reference always-on local agent on the Dragonwing IQ-9075, started from \`examples/always-on-agent\`.
+Always-on local agent on the Dragonwing IQ-9075, started from \`examples/always-on-agent\`.
 
-This scaffold uses d1-2B and LFM3-1.7B, not mandatory competition models. You may replace the gate with a rule or another decision design and choose another LFM3-family model after verifying its runtime/NPU and task behavior. External sensors are optional and not provided.
+The reference models are LFM3-1.7B and, optionally, d1-2B; neither is mandatory. Choose another LFM3-family model after verifying its runtime/NPU and task behavior. External sensors are optional and not provided.
 
 ## Loop
 
-observe → decide (d1-2B, CPU) → act (allowlist) → explain (LFM, NPU, only on alerts) → log (JSONL)
+observe → decide (a rule, or d1-2B on the CPU) → act (allowlist) → explain (LFM, NPU, only on alerts) → log (JSONL)
 
 ## What to change
 
 | File / function | Change it to |
 |---|---|
 | \`agent.py\` \`read_sensors()\` / \`BoardTelemetry\` | your real signal (camera frame, mic level, serial sensor, log tail) |
-| \`questions.py\` | the decisions you act on |
+| \`agent.py\` \`rule_decide()\`, \`--rule-temp-c\`, \`--rule-rise-c\` | your rule and limits, set from your own readings |
+| \`questions.py\`, \`--threshold\` | with \`--gate d1\`: the decisions you act on and a calibrated threshold (skills/iq9-d1-decision-gate), not 0.5 |
 | \`agent.py\` \`ALLOWED_ACTIONS\`, \`run_action()\` | your actions; every new action goes on the allowlist on purpose |
 | \`agent.py\` \`build_prompt()\` | include trend and direction, not just raw values |
-| \`--threshold\` | calibrated value (skills/iq9-d1-decision-gate) — not 0.5 |
 
-\`lfm_client.py\` provides capped calls, usable-output checks, unique initial raw prompts, and one retry. It does not execute tools or enforce their argument schemas/action policy. The copied \`agent.py\` currently uses its own explanation code; switch \`explain()\` to the client if preferred. Keep \`--stable-prompt\` for diagnostics only, never normal runs.
+\`agent.py\` sends explanations through \`lfm_client.py\`: capped calls, usable-output checks, unique raw prompts, and one retry. The client does not execute tools or enforce argument schemas/action policy. Keep \`--stable-prompt\` for diagnostics only.
 
 ## Run
 
 \`\`\`bash
 # From the repo root, in a separate terminal:
 bash skills/iq9-geniex-lfm/scripts/serve.sh run
-# From this app's directory, in another terminal:
-~/.venvs/d1/bin/python agent.py --sensor-mode simulated --iterations 4 --interval 1 --log test.jsonl   # smoke test
+# From this app's directory, in another terminal. The rule gate needs no d1 venv or snapshot:
+python3 agent.py --gate rule --sensor-mode simulated --iterations 4 --interval 1 --log test.jsonl   # smoke test
+python3 agent.py --gate rule --log agent_log.jsonl
+# With the d1 venv and snapshot set up (d1 is the default gate):
 ~/.venvs/d1/bin/python agent.py --threshold <calibrated> --log agent_log.jsonl
 \`\`\`
 
 ## Offline and verification status
 
-Load d1 from the pinned local snapshot with offline settings; use only an already-cached generator. No installs, pulls, CDN assets, or telemetry at runtime. Ask before any model download/import or network cut. A passing local test is not a physical network-off rehearsal.
+Use only an already-cached generator; with \`--gate d1\`, the pinned local snapshot loads with offline settings. No installs, pulls, CDN assets, or telemetry at runtime. A passing local test is not a network-off rehearsal.
 
 ## Measured (fill in after running this app)
 
@@ -99,4 +104,4 @@ EOF
 
 echo "created $DEST:"
 find "$DEST" -maxdepth 1 -type f -exec basename {} \; | sort | sed 's/^/  /'
-echo "next: edit read_sensors() and questions.py, then run the smoke test in $DEST/README.md"
+echo "next: run the smoke test in $DEST/README.md, then edit read_sensors() and the gate"

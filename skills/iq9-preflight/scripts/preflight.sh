@@ -51,7 +51,7 @@ arch="$(uname -m)"
 
 # Informational for every profile: this is not a display test or affected-version detection.
 add WARN display "external monitor compatibility not checked; organizer-reported Adreno APT update issue; SSH unaffected" \
-  "for monitor setups, confirm the affected update and approved removal/rollback with organizers and owner; upstream installer is not event-adapted (docs/developer-guide.md section 3.2)"
+  "for monitor setups, confirm the affected update and approved removal/rollback with organizers; upstream installer is not event-adapted (docs/developer-guide.md section 3.2)"
 
 nodes="$(find /dev -maxdepth 1 -name 'fastrpc-cdsp*' ! -name '*-secure' 2>/dev/null | wc -l | tr -d ' ')"
 [ "$nodes" -ge 2 ] && add ok npu-nodes "$nodes CDSP nodes (/dev/fastrpc-cdsp, -cdsp1)" \

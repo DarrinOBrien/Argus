@@ -10,12 +10,13 @@
 #
 # Why a script: the `geniex` on PATH is a launcher, so `kill $!` does not reach the server (measured).
 # Stop checks the port owner's command before signalling it. The server log goes to $GENIEX_SERVE_LOG
-# (default ./geniex-serve.log) at --log info. A capped request must precede device verification.
+# (default ~/geniex-serve.log, the same from any directory) at --log info, and each run/start replaces it.
+# A capped request must precede device verification.
 
 set -euo pipefail
 
 PORT="${GENIEX_PORT:-18181}"
-LOG="${GENIEX_SERVE_LOG:-$PWD/geniex-serve.log}"
+LOG="${GENIEX_SERVE_LOG:-$HOME/geniex-serve.log}"
 URL="http://127.0.0.1:$PORT"
 
 pid_on_port() {
@@ -80,8 +81,18 @@ stop() {
 status() {
   if up; then
     echo "running on $URL (pid $(pid_on_port))"
+    # Say so when the NPU evidence is unavailable: a silent gap reads like a missing HTP0 line.
     if [ -f "$LOG" ]; then
-      grep -a "Using .* device(s)" "$LOG" | tail -1 | sed 's/.*resolve_devices\] /  device: /' || true
+      local dev
+      dev="$(grep -a "Using .* device(s)" "$LOG" | tail -1 | sed 's/.*resolve_devices\] /  device: /' || true)"
+      if [ -n "$dev" ]; then
+        echo "$dev"
+        echo "  log: $LOG"
+      else
+        echo "  device: no device line in $LOG yet; send a capped request, then run status again"
+      fi
+    else
+      echo "  device: unknown; no server log at $LOG (was this server started by serve.sh, or with another GENIEX_SERVE_LOG?)"
     fi
     curl -s -m 5 "$URL/v1/models" | python3 -c 'import json,sys; [print("  model:", m["id"]) for m in json.load(sys.stdin)["data"]]'
   else

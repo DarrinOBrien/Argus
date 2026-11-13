@@ -1,13 +1,24 @@
 # Developer Guide - LiquidAI on Qualcomm Dragonwing IQ-9075
 
-Reference documentation for developers at the On-Device AI Hackathon: Cleared for Takeoff.
+Reference for developers at the On-Device AI Hackathon: Cleared for Takeoff. Schedule, venue, and logistics are on the [event page](https://luma.com/0nsdnkoa).
 
 * **Hardware:** Dragonwing IQ-9075 EVK, Ubuntu 24.04 aarch64.
-* **Generator and tools:** choose an LFM3-family model that fits the project. The examples default to LFM3-1.7B GGUF through GenieX v0.10.0 on the NPU.
-* **Optional ZETIC route:** LFM3-1.7B text and LFM3-Omni-2B local image/audio → text through ZETIC's Hexagon SDK. See [why it is included](#25-optional-zetic-route) and the [example](../examples/zetic-lfm/README.md).
-* **Optional decision layer:** d1-2B through Transformers on the CPU, or a rule/another decision design.
-* **Inputs:** external sensors are optional and not supplied. Use brought sensors, internal readings, local files/events, or simulated inputs.
+* **Generator and tools:** any LFM3-family model that fits the project. The examples default to LFM3-1.7B GGUF through GenieX v0.10.0 on the NPU.
+* **Optional ZETIC route:** LFM3 text and local image/audio → text through ZETIC's Hexagon SDK. See [section 2.5](#25-optional-zetic-route).
+* **Optional decision layer:** d1-2B through Transformers on the CPU, or a rule in code.
+* **Inputs:** external sensors are optional and not supplied. Use brought sensors, board readings, local files, or simulated inputs.
 * **Deployment:** the final demo runs without the network.
+
+**The shortest path to a first response:** get a board shell ([0](#0-board-access-and-internet-for-setup)) → install the NPU packages and join `fastrpc` ([3.2](#32-driver-packages)) → install GenieX ([3.3](#33-geniex-cli)) → import the model from the USB drive ([4](#4-stage-your-model)) → start the server and send a request ([5](#5-local-server-openai-compatible)). d1 is not needed for that.
+
+## Ground rules
+
+These apply to every section and are not repeated in each one.
+
+1. **Inspect first, then ask before changing anything.** Reuse what already works. Installs and upgrades, model copies/imports/downloads/removals, network, account, and SSH changes, and file deletions need the participant's approval. Coding agents follow the full list in [AGENTS.md](../AGENTS.md#non-negotiable-rules).
+2. **Passwords stay with the participant.** They type sudo, Wi-Fi, and login passwords in their own terminal. Never put them in chat, commands, or logs. An agent's non-interactive SSH session cannot answer a sudo prompt: it prints the exact command, the participant runs it and pastes back the non-secret output.
+3. **Every command runs on the laptop or on the board, and says which.** The laptop has no GenieX, NPU, or models. Board commands run from the repo root unless stated otherwise.
+4. **Setup may use the internet; the app may not.** Nothing is installed or downloaded when the app starts.
 
 ## Table of contents
 
@@ -29,43 +40,44 @@ Reference documentation for developers at the On-Device AI Hackathon: Cleared fo
 
 Start here if you do not yet have a board shell or working internet on the board. If both already work, reuse them and continue to [setup](#3-setup). Coding agents should follow the [getting-started skill](../skills/iq9-getting-started/SKILL.md).
 
-**First establish access, then inspect, propose a plan, and make approved changes.** Ask whether the agent is running on the laptop or the board, which host OS is in use, and what is available: an existing SSH session, a micro-USB UART cable, Wi-Fi, or Ethernet. Do not guess a board address or assume the laptop's internet connection gives the board internet access. A working local console is also an option; external monitors have the [Adreno caveat](#32-driver-packages).
+Find out what is available first: an existing SSH session, a micro-USB UART cable, Wi-Fi, or Ethernet, and which laptop OS is in use. Do not guess a board address, and do not assume the laptop's internet connection gives the board internet access.
 
-The steps below adapt Qualcomm's **Ubuntu** [IQ-9075 device setup guide](https://dragonwingdocs.qualcomm.com/Ubuntu/devices/iq9075-evk/set-up-the-device), specifically [debug UART](https://dragonwingdocs.qualcomm.com/Ubuntu/devices/iq9075-evk/set-up-the-device#set-up-the-debug-uart), [network setup](https://dragonwingdocs.qualcomm.com/Ubuntu/devices/iq9075-evk/set-up-the-device#connect-to-the-network), and [SSH](https://dragonwingdocs.qualcomm.com/Ubuntu/devices/iq9075-evk/set-up-the-device#connect-over-ssh). They are not instructions for the separate Qualcomm Linux image.
+These steps adapt Qualcomm's **Ubuntu** [IQ-9075 device setup guide](https://dragonwingdocs.qualcomm.com/Ubuntu/devices/iq9075-evk/set-up-the-device) ([debug UART](https://dragonwingdocs.qualcomm.com/Ubuntu/devices/iq9075-evk/set-up-the-device#set-up-the-debug-uart), [network](https://dragonwingdocs.qualcomm.com/Ubuntu/devices/iq9075-evk/set-up-the-device#connect-to-the-network), [SSH](https://dragonwingdocs.qualcomm.com/Ubuntu/devices/iq9075-evk/set-up-the-device#connect-over-ssh)), not the separate Qualcomm Linux image.
 
 ### 0.1 Open the UART console if needed
 
-Power the board with its supplied adapter and connect a **data-capable micro-USB cable** from the board's debug UART port to the laptop. This is not the USB-C flashing/network port. Open the **Main Domain** UART at **115200 baud**; the onboard FTDI adapter exposes multiple serial ports, and its second functional port (Converter B) is the Linux login console.
+Power the board with its supplied adapter and connect a **data-capable micro-USB cable** from the board's debug UART port to the laptop. This is not the USB-C port. Open the **Main Domain** UART at **115200 baud**: the onboard FTDI adapter exposes several serial ports, and the second functional one (Converter B) is the Linux login console.
 
-- **Ubuntu/Linux laptop:** list ports with `ls /dev/ttyUSB*`. Qualcomm's example uses `/dev/ttyUSB1`; identify this board's port rather than assuming that number when other adapters are attached. With the port confirmed, open `sudo screen /dev/ttyUSB1 115200` in a separate terminal. If `screen` is missing, ask before installing it on the **laptop**.
-- **macOS laptop:** list ports with `ls /dev/cu.*`, identify this board's Main Domain port, then use `screen /dev/cu.<actual-device-node> 115200` in a separate terminal. Substitute the observed node, not an upstream example's serial number.
-- **Windows laptop:** use Device Manager to identify Converter B's COM port, then open PuTTY in Serial mode at 115200. See the upstream UART section for port identification and FTDI driver instructions; ask before any laptop installation.
+- **Linux laptop:** list ports with `ls /dev/ttyUSB*`, then `sudo screen /dev/ttyUSB1 115200`. Qualcomm's example uses `ttyUSB1`; confirm this board's port when other adapters are attached.
+- **macOS laptop:** list ports with `ls /dev/cu.*`, then `screen /dev/cu.<observed-node> 115200`.
+- **Windows laptop:** find Converter B's COM port in Device Manager, then open PuTTY in Serial mode at 115200. The upstream UART section covers the FTDI driver.
 
-Only one application should own the UART port. Inspect a busy port rather than opening a second session or killing another user's terminal. If the agent cannot interact with a serial terminal, guide the participant through these steps and ask for non-secret output. Press **Enter** for the login prompt.
+Only one application can own the port; do not open a second session or kill someone else's terminal. Press **Enter** for the login prompt.
 
-**Organizer-provided event login (UART and SSH):**
+**Event login (UART and SSH):**
 
 | Field | Event value |
 | --- | --- |
 | Username | `ubuntu` |
 | Password | `liquidxqualcomm` |
 
-These are shared event credentials, not production credentials. The upstream Ubuntu guide's initial `ubuntu` / `ubuntu` login is **not** the event login. If the event credentials fail or a password-change prompt appears, confirm the image/account state with the owner or organizers; do not reset accounts or reflash automatically. Enter passwords interactively, not in logged commands. Do not expose these boards to the public internet; ask before changing passwords or SSH configuration.
+These are shared event credentials. The upstream guide's `ubuntu` / `ubuntu` login is **not** the event login. If the event login fails or a password-change prompt appears, ask the organizers; do not reset accounts or reflash. Do not expose the board to the public internet.
 
 ### 0.2 Inspect and connect the board
 
-Run these in the **board's UART shell** (or reuse an already working board shell):
+On the **board** (UART shell or an existing session):
 
 ```bash
 uname -m                         # expect aarch64; GenieX need not exist yet
-nmcli -p device                  # observed network interfaces and state
+cat /etc/os-release              # expect Ubuntu 24.04
+nmcli -p device                  # network interfaces and state
 ip -br address
 ip route
 ```
 
-Inspect `/etc/os-release` to confirm Ubuntu 24.04. A different patch/kernel version is not by itself a reason to reflash. If a suitable network connection already works, leave it alone.
+If a suitable connection already works, leave it alone. A different patch or kernel version is not a reason to reflash.
 
-For **Wi-Fi**, ask which SSID to use and have the participant enter its password privately in the UART terminal. After approval to change the board's network configuration:
+For **Wi-Fi**, with approval to change the board's network configuration:
 
 ```bash
 nmcli dev wifi list
@@ -74,15 +86,15 @@ nmcli -p device
 ip -br address
 ```
 
-Replace `YOUR_WIFI_SSID` with the selected SSID, preserving quotes for names containing spaces. `--ask` prompts for the Wi-Fi password instead of putting it in shell history or agent logs; this adapts upstream's `sudo nmcli dev wifi connect <WiFi-SSID> password <WiFi-password>`. A `sudo` password prompt uses the **board account** password, not the Wi-Fi password. Do not request private Wi-Fi passwords in chat or store them in this repo.
+Keep the quotes for names with spaces. `--ask` prompts for the Wi-Fi password instead of putting it in shell history. The `sudo` prompt wants the **board account** password, not the Wi-Fi password.
 
-For **Ethernet**, connect the EVK's RJ45 port to an approved network/router, then inspect `nmcli -p device` and `ip -br address` in the UART shell. Upstream's example interface names are `wlp1s0` for Wi-Fi and `end0` for Ethernet; use the names actually reported by this board. A laptop-to-board cable or an IP address alone does not establish internet access.
+For **Ethernet**, connect the RJ45 port to a network with internet access, then check `nmcli -p device` and `ip -br address`. Use the interface names the board reports (upstream examples: `wlp1s0`, `end0`). A laptop-to-board cable or an IP address alone is not internet access.
 
-Do not disable/reconfigure the interface carrying an active SSH session without an approved fallback control path and restoration plan. If Wi-Fi requires a captive portal or enterprise authentication, get the network's supported connection instructions from organizers rather than inventing credentials or bypassing access controls.
+Do not reconfigure the interface carrying an active SSH session without a fallback such as UART. For a captive portal or enterprise Wi-Fi, ask the organizers for the supported way to connect.
 
 ### 0.3 Check internet access from the board
 
-Internet is used **during setup** to stage software and model assets, not during app inference or the final demo. On the board, inspect the default route and DNS, then use bounded HTTPS checks for the actual setup sources:
+On the **board**, check the route, DNS, clock, and the two setup sources. These fetch headers only:
 
 ```bash
 ip route
@@ -94,31 +106,31 @@ curl -I --connect-timeout 5 --max-time 15 \
 curl -I --connect-timeout 5 --max-time 15 https://huggingface.co
 ```
 
-These fetch headers, not installers or model weights. If a command is unavailable, report the missing tool and ask before installing it. Diagnose link/address, route, DNS, and HTTPS/TLS separately. An HTTP error, captive-portal redirect, or one unreachable endpoint does not prove general internet access works or fails. Do not disable TLS verification to work around a bad clock or certificate error. Check package sources separately when installations are needed.
+Diagnose link, route, DNS, and HTTPS separately; one failed endpoint does not mean there is no internet. Do not disable TLS verification to work around a bad clock or certificate error.
 
-Preflight's external HTTPS probe is informational and does not fail a profile when offline; `ready: true` is **not** proof of online setup readiness or of a network-off rehearsal.
+Preflight's network probe is informational: `ready: true` proves neither online setup readiness nor a network-off rehearsal.
 
 ### 0.4 Move to SSH and setup
 
-Once the board has a known reachable address, connect from the **laptop** on the same reachable network. Replace `BOARD_IP` with the address observed in the board shell:
+On the **laptop**, on a network that can reach the board, using the address the board reported:
 
 ```bash
 export IQ9_HOST='ubuntu@BOARD_IP'
 ssh "$IQ9_HOST"
 ```
 
-Enter the event password when prompted. Keep SSH host-key verification enabled. Verify an unfamiliar or changed key against the board/owner before accepting it or approving removal of a stale entry; a reflash can change the key, but a mismatch is not permission to bypass verification. For a refused connection, inspect the SSH service from UART before proposing service or firewall changes. Some event networks isolate clients even when both have internet access; ask organizers for a supported control link if SSH is blocked.
+Keep SSH host-key verification on. A reflash changes the board's key; confirm that is the cause before removing a stale `known_hosts` entry. If the connection is refused, check the SSH service from UART. Some event networks isolate clients from each other; ask the organizers if SSH is blocked.
 
-Next run the [hardware-only preflight](#31-confirm-the-board), inventory existing software/weights/disk, and present a setup plan. Missing GenieX and weights are setup work, not proof of a bad flash. You do not need the whole repo on the board: see [driving the board from the laptop](#05-drive-the-board-from-the-laptop-no-repo-copy). If a full copy is wanted, arrange an approved, non-destructive copy, preserving unrelated board files.
+Next, run the [hardware-only preflight](#31-confirm-the-board), take stock of the installed software, weights, and disk, and plan the setup. Missing GenieX and weights are normal on a fresh board, not a bad flash. The repo can stay on the laptop ([next section](#05-drive-the-board-from-the-laptop-no-repo-copy)).
 
-The first milestone is a **useful local LFM response with current-server `HTP0` evidence**, following [sections 3–5](#3-setup) and the [generator skill](../skills/iq9-geniex-lfm/SKILL.md). Leave d1 optional. Report this milestone separately from an actual [offline rehearsal](offline-readiness.md), which requires explicit approval before a network cut.
+The first milestone is a **useful local LFM response with the current server's `HTP0` line**, from [sections 3–5](#3-setup). That is separate from an [offline rehearsal](offline-readiness.md), which comes later.
 
 ### 0.5 Drive the board from the laptop (no repo copy)
 
-The repo can stay on the laptop. One-shot helpers read their script from SSH stdin, so nothing is copied to the board. These run on the **laptop**, from the repo root, with `IQ9_HOST` set as above (an `~/.ssh/config` alias also works):
+One-shot helpers read their script from SSH stdin, so nothing is copied to the board. On the **laptop**, from the repo root, with `IQ9_HOST` set (an `~/.ssh/config` alias also works):
 
 ```bash
-# Laptop. Non-interactive SSH may not put ~/.local/bin (GenieX's user install) on PATH.
+# Non-interactive SSH may not put ~/.local/bin (GenieX's user install) on PATH.
 B='export PATH="$HOME/.local/bin:$PATH"'
 
 # Preflight: hardware first, then the generator profile after setup
@@ -129,45 +141,36 @@ ssh "$IQ9_HOST" "$B; bash -s -- --profile generator --json" < skills/iq9-preflig
 ssh "$IQ9_HOST" "python3 - --sentence 'Explain why local inference is useful when the internet is unavailable.'" \
   < skills/iq9-geniex-lfm/scripts/lfm_client.py
 
-# Server status plus the HTP0 line; point GENIEX_SERVE_LOG at the board-side server log
-ssh "$IQ9_HOST" "$B; GENIEX_SERVE_LOG=\$HOME/iq9-work/geniex-serve.log bash -s -- status" \
-  < skills/iq9-geniex-lfm/scripts/serve.sh
+# Server status plus the HTP0 line from the board's ~/geniex-serve.log
+ssh "$IQ9_HOST" "$B; bash -s -- status" < skills/iq9-geniex-lfm/scripts/serve.sh
 ```
 
-The paths in these commands are on the **board**: `~/.local/bin/geniex`, the GenieX cache `~/.cache/geniex/models`, and a work/log directory such as `~/iq9-work/`. The laptop has no GenieX, NPU, or models.
+Paths in these commands are on the **board**: `~/.local/bin/geniex`, the GenieX cache `~/.cache/geniex/models`, and the server log `~/geniex-serve.log`.
 
-Streaming suits one-shot CLI helpers: preflight, `lfm_client.py --check/--sentence/--chat`, and `serve.sh status`. For the long-running server, or app code that imports `lfm_client`, copy just the needed files to a board work directory with approval (for example `scp skills/iq9-geniex-lfm/scripts/{serve.sh,lfm_client.py} "$IQ9_HOST":iq9-work/`). Then run the server in a separate board SSH terminal from that directory, so its log stays on the board.
-
-**sudo stays with the participant.** The agent's SSH session is non-interactive and cannot answer a sudo prompt. The agent prints the exact command; the participant runs it in their own `ssh "$IQ9_HOST"` terminal, enters the password there, and pastes back the non-secret output. Never put passwords in commands, chat, or logs.
+Streaming suits one-shot helpers: preflight, `lfm_client.py --check/--sentence/--chat`, and `serve.sh status`. For the long-running server, or app code that imports `lfm_client`, copy just those files to a board work directory (for example `scp skills/iq9-geniex-lfm/scripts/{serve.sh,lfm_client.py} "$IQ9_HOST":iq9-work/`) and run the server in its own board terminal.
 
 ## 1. Pre-work
 
-**Event boards will arrive with freshly flashed Ubuntu images.** Use Qualcomm's required-software guide for post-flash setup, then install and stage your project's runtimes, dependencies, and models while internet access is available. Do not assume the image already includes GenieX, torch, or model weights.
+**Event boards arrive with freshly flashed Ubuntu images.** Do not assume the image includes GenieX, torch, or model weights; install and stage what your project needs while internet access is available.
 
 * [IQ-9075 EVK setup](https://dragonwingdocs.qualcomm.com/Ubuntu/devices/iq9075-evk/set-up-the-device)
-* [IQ-9075: Install Required Software Packages](https://dragonwingdocs.qualcomm.com/Ubuntu/devices/iq9075-evk/Install_required_software_packages)
-* [GenieX quickstart](https://geniex.aihub.qualcomm.com/en/get-started/quickstart)
-* [GenieX platforms and runtimes](https://geniex.aihub.qualcomm.com/en/get-started/platforms)
-* [LFM3-1.7B GGUF model card](https://huggingface.co/LiquidAI/LFM3-1.7B-GGUF)
-* [d1-2B model card](https://huggingface.co/LiquidAI/d1-2B)
-
-The required-software page covers a broad set of AI, camera, and multimedia use cases; not every package is needed by every project. Read the [monitor caveat in section 3.2](#32-driver-packages) before running its installation script.
-
-Run commands below on the board from the repo root unless a different directory is specified. From a laptop, use the board host supplied by the owner; do not assume the laptop has GenieX, the NPU, or the models.
+* [IQ-9075: Install Required Software Packages](https://dragonwingdocs.qualcomm.com/Ubuntu/devices/iq9075-evk/Install_required_software_packages) (covers many AI, camera, and multimedia cases; read the [monitor caveat](#32-driver-packages) before running its script)
+* [GenieX quickstart](https://geniex.aihub.qualcomm.com/en/get-started/quickstart) and [platforms and runtimes](https://geniex.aihub.qualcomm.com/en/get-started/platforms)
+* [LFM3-1.7B GGUF model card](https://huggingface.co/LiquidAI/LFM3-1.7B-GGUF) and [d1-2B model card](https://huggingface.co/LiquidAI/d1-2B)
 
 ## 2. Architecture
 
 ### 2.1 Two models, two jobs
 
-**This is an example implementation, not a prescribed architecture or a recipe for the hackathon.** It shows one way you *could* combine a decision gate, guarded actions, and an explanation model. Teams do not need to follow this pattern, use d1, or build a two-model monitor to compete or win. Choose the design that best serves your project's purpose and the [judging criteria](judging.md).
+**This is an example, not a prescribed architecture.** Teams do not need d1, a two-model design, or a monitor to compete or win. Choose the design that serves your project and the [judging criteria](judging.md).
 
-In this example, the reference monitor separates a decision from its explanation:
+The reference monitor separates a decision from its explanation:
 
 ```text
 Local observation
     |
     v
-d1-2B or a rule: decide whether anything needs attention
+A rule or d1-2B: decide whether anything needs attention
     |
     +-- no action --> log and continue
     |
@@ -180,99 +183,88 @@ d1-2B or a rule: decide whether anything needs attention
                                 local JSONL log
 ```
 
-A rule can replace d1 when the decision is simple. If you use both d1 and LFM in the reference stack, keep their inference sequential. The model may propose actions, but code validates and authorizes them.
+The model may propose actions, but code validates and authorizes them. If you use both d1 and the LFM, keep their inference sequential.
 
 ### 2.2 Runtimes and routes
 
-| Work                     | Route                                                 |
-| ------------------------ | ----------------------------------------------------- |
-| Reference LFM generation and tools | GenieX `llama_cpp`, cached GGUF, NPU          |
-| Optional LFM text/image/audio → text | ZETIC Hexagon SDK, local v73 packages      |
-| Optional d1 gate         | Transformers `system_one()`, local snapshot, fp32 CPU |
+| Work | Route |
+| --- | --- |
+| Reference LFM generation and tools | GenieX `llama_cpp`, cached GGUF, NPU |
+| Optional LFM text/image/audio → text | ZETIC Hexagon SDK, local v73 packages |
+| Optional d1 gate | Transformers `system_one()`, local snapshot, fp32 CPU |
 
 ### 2.3 Compute units
 
-The `--compute` options below describe GenieX, not ZETIC's separate CLI.
+These `--compute` options are GenieX's, not ZETIC's.
 
-| `--compute` | Route         | Guidance                                                                               |
-| ----------- | ------------- | -------------------------------------------------------------------------------------- |
-| `npu`       | Hexagon HTP   | Reference generator route                                                              |
-| `hybrid`    | HTP and CPU   | Evaluate on the selected model and workload before choosing                            |
-| `cpu`       | CPU           | Explicit alternative for compatible models; d1 uses Transformers on the CPU separately |
-| `gpu`       | Adreno/OpenCL | Requires a compatible model/runtime configuration                                      |
+| `--compute` | Route | Guidance |
+| --- | --- | --- |
+| `npu` | Hexagon HTP | Reference generator route |
+| `hybrid` | HTP and CPU | Evaluate on your model and workload before choosing |
+| `cpu` | CPU | Explicit alternative for compatible models |
+| `gpu` | Adreno/OpenCL | Requires a compatible model/runtime configuration |
 
-After a capped generator request, inspect the current device/offload log for `HTP0`. Missing device output calls for diagnosis, not an automatic CPU-fallback conclusion.
+After a capped generator request, look for `HTP0` in the current server's log. A missing line calls for diagnosis, not an assumption that the CPU was used.
 
 ### 2.4 Hardware budget
 
-Budget disk, host RAM, and device buffers separately. Inspect `df -h /` and `free -h` before staging models. See [Offline readiness: disk first](offline-readiness.md#disk-first) for asset and staging budgets.
+Budget disk, host RAM, and device buffers separately. Check `df -h /` and `free -h` before staging models. See [Offline readiness: disk first](offline-readiness.md#disk-first).
 
 ### 2.5 Optional ZETIC route
 
-**GenieX remains the reference Python/server path.** ZETIC is a complementary option for hackathon projects needing a different model/input route, particularly when the selected GenieX build lacks the required audio/Omni projector support. Our IQ9 checks produced useful LFM3-1.7B text and LFM3-Omni-2B text, image, and WAV-transcription results using ZETIC's own Hexagon runtime.
+**GenieX remains the reference Python/server path.** ZETIC is an option for projects that need a different model or input route, particularly audio or Omni input that the selected GenieX build does not support.
 
-The [ZETIC example](../examples/zetic-lfm/README.md) keeps this small: the prebuilt **Ixian Hexagon SDK 0.2.1** CLI, local files, and a capped Python wrapper. It covers the collection's four LFM3 generators for text/image/WAV → text as applicable, using separate two-NSP **v73 packages**, not GGUFs imported into GenieX. The six IQ9 model repositories are public and ungated at the time of review; stage only needed assets with approval. The older apps guide still refers to a separate gated monolithic repository.
+The [ZETIC example](../examples/zetic-lfm/README.md) wraps the prebuilt **Ixian Hexagon SDK 0.2.1** CLI with a capped Python wrapper for LFM3 text/image/WAV → text. It uses separate two-NSP **v73 packages**, not GGUFs, and they are never imported into the GenieX cache. The example pins the SDK release and model revisions and records its verified scope: SDK 0.2.1 and the current packages have been run on the board, while its timing table is from the earlier SDK 0.1.0.
 
-**Upstream resources:** [ZETIC's LFM3 and d1 on Dragonwing IQ9 collection](https://huggingface.co/collections/ZETIC-ai/lfm3-and-d1-on-dragonwing-iq9) for model packages, [Ixian Hexagon SDK releases](https://github.com/zetic-ai/IxianHexagon/releases) for runtime assets, and [ZETIC sample apps](https://github.com/zetic-ai/LFM3-zetic-apps) for fixtures. Our example pins the SDK release and inspected model revisions; those current revisions have not been tested on our board.
+Trade-offs: the one-shot CLI reloads the model on every call, while GenieX keeps it resident. ZETIC's logs show **Hexagon v73 / two NSPs** rather than `HTP0`, and some work stays on the CPU, so do not describe it as entirely on the NPU. Keep output caps, answer checks, and code-side action policy on either runtime. The collection's d1 packages use a separate native API; see [decision routes](decision-models.md#optional-zetic-npu-decisions).
 
-The trade-off is integration: the one-shot CLI reloads per invocation, while GenieX's resident server is convenient for repeated Python calls. ZETIC's C++ SDK can keep a model loaded, but a resident integration is not implemented here. Its current-request device logs identify **Hexagon v73/two NSPs**, rather than GenieX's `HTP0`; CPU work remains, so do not call it entirely-NPU execution. Retain output caps, answer checks, and code-side action policy whichever runtime you choose.
-
-See the example for historical SDK 0.1.0 timing and its verified scope. **Connected-board checks are not a network-off rehearsal.** Video, speech generation, and tools are outside the wrapper. The collection's d1/d1-Omni packages use the vendor's separate native Decision API; see [decision routes](decision-models.md#optional-zetic-npu-decisions). The reference CPU d1 route and snapshot pin are unchanged.
+Upstream: [ZETIC's LFM3 and d1 on Dragonwing IQ9 collection](https://huggingface.co/collections/ZETIC-ai/lfm3-and-d1-on-dragonwing-iq9), [Ixian Hexagon SDK releases](https://github.com/zetic-ai/IxianHexagon/releases), and [ZETIC sample apps](https://github.com/zetic-ai/LFM3-zetic-apps).
 
 ## 3. Setup
 
 ### 3.1 Confirm the board
 
-After establishing [board access](#0-board-access-and-internet-for-setup), start with the hardware-only [preflight](../skills/iq9-preflight/SKILL.md) when the installed stack is not yet known. On the board, from the repo root:
+Start with the hardware-only [preflight](../skills/iq9-preflight/SKILL.md). It is read-only and expects no GenieX, weights, or d1. On the **board**:
 
 ```bash
 bash skills/iq9-preflight/scripts/preflight.sh --profile board --json
 ```
 
-Or from the laptop's repo root, using the confirmed SSH host (the repo need not yet be on the board):
+Or from the **laptop**, with no repo on the board:
 
 ```bash
 ssh "$IQ9_HOST" 'bash -s -- --profile board --json' < skills/iq9-preflight/scripts/preflight.sh
 ```
 
-This inspects hardware/driver readiness without expecting GenieX, model weights, or a d1 environment. Missing driver checks may still need the package setup below; they are not by themselves proof that flashing failed.
+A failed driver check usually means the packages below are not installed yet, not that flashing failed. Every profile prints a `display` warning: it is a reminder about the [monitor issue](#32-driver-packages), not a detected fault.
 
-Every profile also emits a `display` warning about the Adreno monitor issue. It is a setup reminder, not a detected display failure: preflight does not test monitor compatibility or identify affected graphics-package versions. A passing run does not establish that a monitor setup works.
-
-After setup and model staging, choose the app's profile: `--profile generator --model 'cached-name:precision'` without d1, or `--profile reference` for the full example stack. Missing runtimes/models are expected before they have been installed or staged.
+After setup and model staging, use `--profile generator` (add `--model 'cached-name:precision'` for another model), or `--profile reference` for the full stack with d1.
 
 ### 3.2 Driver packages
 
-For post-flash setup, refer to Qualcomm's [Install Required Software Packages](https://dragonwingdocs.qualcomm.com/Ubuntu/devices/iq9075-evk/Install_required_software_packages) guide.
+**External monitors:** organizers report that the current Adreno APT update causes a GPU-driver issue with external monitors. SSH is not affected. See [Developer Notes](../README.md#external-monitors-and-headless-setups) before using a monitor. Because of that:
 
-**External monitor warning:** organizers report that the current Adreno APT update causes a GPU-driver issue with an external monitor. Teams using a monitor must **remove/roll back that update**; SSH is unaffected. See [Developer Notes](../README.md#external-monitors-and-headless-setups). Confirm installed versions and the board-specific removal/rollback procedure with the organizers and board owner; do not blindly purge GPU packages.
+- Do not install or update `qcom-adreno1` as part of NPU setup.
+- Do not run Qualcomm's `install_ppa_pkgs.sh` unchanged. It installs Adreno packages (its Desktop path also adds a Mesa PPA), runs a broad upgrade, and reboots. No event-specific version of that script is provided here.
 
-**The linked upstream `install_ppa_pkgs.sh` is not adapted for this event's monitor issue.** Do not run it unchanged for a monitor setup until organizers confirm which graphics changes to omit or roll back.
-
-Its Server path installs `qcom-adreno1`; its Desktop path installs `qcom-adreno-cl-dev`, adds a Mesa PPA, and upgrades `libegl-mesa0`. It also performs a broad package upgrade and reboots. These are the script's graphics changes, not confirmed causes of the monitor issue; excluding `qcom-adreno1` alone is not a verified Desktop workaround.
-
-No event-specific patched installer is provided here. The affected packages/versions and approved installation or rollback procedure need confirmation before one can be supplied.
-
-Inspect the current drivers and permissions before making changes. With the board owner's approval, refresh the **existing** APT sources and simulate only missing base and NPU libraries before installation. Do not install/update `qcom-adreno1` as part of this NPU setup. For example, when GLib and the OpenCL loader are already installed:
+The NPU needs only a few packages. On the **board**, refresh the existing APT sources and simulate the install first:
 
 ```bash
 sudo apt-get update &&
 apt-get -s install --no-install-recommends libatomic1 qcom-fastrpc1 libqnn1
 ```
 
-If GLib or the OpenCL loader is missing, include the appropriate Ubuntu 24.04 packages (`libglib2.0-0t64`, `ocl-icd-libopencl1`) in the simulation and installation lists. Review the resulting dependencies, candidate versions, upgrades, and removals. Stop if the plan adds graphics changes or other changes outside the owner's approval. Only after a successful source refresh and an acceptable simulation, run the matching install interactively (no automatic `-y`):
+Add `libglib2.0-0t64` and `ocl-icd-libopencl1` to both commands if GLib or the OpenCL loader is missing. Read the plan: stop if it adds graphics packages, upgrades, or removals you did not expect. Then install interactively, without `-y`:
 
 ```bash
 sudo apt-get install --no-install-recommends libatomic1 qcom-fastrpc1 libqnn1
 ```
 
-If sudo requires a password, have the participant enter it privately in their board terminal, not in chat or logged commands.
-
-Follow the board setup guide rather than adding duplicate package sources.
+Do not add package sources.
 
 #### NPU device access
 
-GenieX needs **read and write** access to `/dev/fastrpc-cdsp` and `/dev/fastrpc-cdsp1`. Nodes can exist and be readable while still unusable. Check, on the board:
+GenieX needs **read and write** access to `/dev/fastrpc-cdsp` and `/dev/fastrpc-cdsp1`. Nodes can exist and be readable while still unusable. On the **board**:
 
 ```bash
 ls -l /dev/fastrpc-cdsp*
@@ -283,72 +275,67 @@ for n in /dev/fastrpc-cdsp /dev/fastrpc-cdsp1; do
 done
 ```
 
-1. **Root-only nodes and no `fastrpc` group:** the FastRPC package is missing. `qcom-fastrpc1` installs the udev rules that give the nodes to the `fastrpc` group. Install it with the approved package step above, then re-inspect.
-2. **Group-owned nodes, user not in the group:** with approval, the participant runs `sudo usermod -aG fastrpc "$USER"` (use the observed group name). Group changes apply only to **new** logins. Exit and reconnect SSH, and re-check `id -nG`; already-open shells and servers keep the old groups.
-3. **User in the group but still no access:** inspect the node's group and mode, and the installed udev rules, before changing anything. Do not `chmod` device nodes as a workaround.
+1. **Root-only nodes and no `fastrpc` group:** `qcom-fastrpc1` is missing. It installs the udev rules that give the nodes to the `fastrpc` group. Install it as above, then check again.
+2. **Group-owned nodes, user not in the group:** run `sudo usermod -aG fastrpc "$USER"`. Group changes apply only to **new** logins: reconnect SSH and re-check `id -nG`. Shells and servers that were already running keep the old groups.
+3. **In the group but still no access:** inspect the node's group and mode and the installed udev rules. Do not `chmod` device nodes.
 
-The preflight `npu-access` check tests read and write on each node, but passing it is not NPU verification. Finish with a capped useful request and the **current** server's `HTP0` log line ([section 5](#5-local-server-openai-compatible)). A server started before the group change must be restarted (with permission) from a new login.
-
-On a freshly flashed image, expect to need both steps: installing `qcom-fastrpc1`, then adding the user to `fastrpc` and reconnecting.
+On a freshly flashed image, expect both steps 1 and 2. Preflight's `npu-access` check tests read and write, but passing it is not NPU verification: finish with a capped request and the **current** server's `HTP0` line ([section 5](#5-local-server-openai-compatible)). Restart a server that was started before the group change.
 
 #### Stale APT lists and package-file 404s
 
-Freshly flashed images can contain old APT indexes. A package-file `404 Not Found` does not by itself mean the board has no internet or needs a new PPA: the cached candidate may reference a file the configured source no longer serves.
+A freshly flashed image carries APT indexes from the day it was built. A package download that returns `404 Not Found` usually means the cached index points to a file the source no longer serves, typically for the older QAIRT packages (`qairt-dsp-binaries`, `qairt-libs`, `libqnn1`). It does not mean the board is offline or needs a new PPA.
 
-Typical symptom: the image's Qualcomm PPA lists date from the flash, so downloads for older QAIRT packages (`qairt-dsp-binaries`, `qairt-libs`, `libqnn1`) return 404 and nothing installs. Refreshing the existing sources normally selects newer package versions; re-simulate and confirm there are no upgrades or removals before installing. Package versions change over time and are not pins.
+Recover during online setup:
 
-**System packages and GenieX's runtime are separate.** GenieX ships its own QAIRT runtime (`geniex version` shows it), which can differ from the system QAIRT packages APT installs. Record the APT candidate, the installed package version (`dpkg-query -W`), and the GenieX runtime version separately; they are not interchangeable. Install the packages listed above; do not trim the list on the assumption that the bundled runtime makes them unnecessary.
+1. Check what is installed and what APT would install: `dpkg-query -W` and `apt-cache policy`.
+2. Run `sudo apt-get update` against the existing sources, then simulate the install again. If the update reports failed sources, diagnose those first.
+3. Review the refreshed plan. "N not upgraded" does not call for a broad upgrade. Do not run `apt upgrade`/`dist-upgrade`, add a PPA, change Adreno, use `--fix-missing`, or disable signature or TLS checks.
+4. If 404s persist after a clean refresh, report the exact URL and source instead of switching runtime or repository.
 
-Recovery, during approved online setup only:
-
-1. Check installed package state and cached candidates (`dpkg-query -W`, `apt-cache policy`). If useful, inspect list timestamps under `/var/lib/apt/lists`; a failed fetch is not evidence that installation completed.
-2. Run `sudo apt-get update` against the existing sources, then re-simulate the actual missing-package list as above. If update reports failed sources or retained old indexes, stop and diagnose those errors rather than trusting its exit status alone.
-3. Review the refreshed install plan before accepting it. An “N not upgraded” message does not require a broad upgrade. Do not run `apt upgrade`/`dist-upgrade`, add a PPA, change Adreno, disable signature/TLS verification, or use `--fix-missing` as a stale-index workaround.
-4. If package-file 404s persist after a successful refresh, inspect the exact URL and source metadata; report the remaining source problem instead of guessing a different runtime or repository. After installation, record actual versions, rerun preflight, and verify a capped useful LFM response with current-server `HTP0` evidence.
+**System packages and GenieX's runtime are separate.** GenieX ships its own QAIRT runtime (`geniex version` shows it), which can differ from the QAIRT packages APT installs. Record both versions; neither replaces the other, so install the full package list above.
 
 ### 3.3 GenieX CLI
 
-First inspect `geniex version`, `geniex --help`, and `geniex config get chipset`. The reference version is v0.10.0. Do not replace an existing install unnecessarily.
+Check `geniex version` and `geniex config get chipset` first. The reference version is v0.10.0; do not replace a working install.
 
-If installation is needed, obtain approval and stage the installer while networking is available:
+If GenieX is missing, on the **board**:
 
 ```bash
 curl -fSLo install.sh https://qaihub-public-assets.s3.us-west-2.amazonaws.com/qai-hub-geniex/install.sh
-# Read install.sh before executing it; back up an install being replaced.
+# Read install.sh before running it.
 sh install.sh --version v0.10.0
 ```
 
-Keep the installer and matching archive locally for recovery. No runtime installation is part of the app's launch path.
+Keep the installer and its archive on the board for recovery.
 
 ### 3.4 Python environment for the decision layer
 
-Skip this step if the app does not use d1. Reuse a compatible existing d1 environment if available. Before creating a venv that inherits system packages, check whether the board's Python already has torch:
+Skip this if the app does not use d1. Check whether the board's Python already has torch:
 
 ```bash
 python3 -c 'import torch; print(torch.__version__)'
 ```
 
-A fresh image may not include torch. If it is missing, arrange a compatible aarch64 CPU torch installation and matching torchvision with approval before continuing. The example requirements deliberately omit torch and pin torchvision to the reference pairing (torch 2.11.0 / torchvision 0.26.0); do not assume these are preinstalled or replace a working installation blindly.
-
-Create the environment only if needed, with approval, and stage dependencies while networking is available:
+Create the environment and install the example's requirements:
 
 ```bash
 python3 -m venv --system-site-packages ~/.venvs/d1
 source ~/.venvs/d1/bin/activate
+python -m pip install --dry-run -r examples/system-one-decision/requirements.txt   # review the plan
 python -m pip install -r examples/system-one-decision/requirements.txt
 ```
 
-If torch is already present, reuse it and match torchvision to that build, adjusting the dependency selection as needed before installation. The [System One example](../examples/system-one-decision/README.md) covers the pinned snapshot, remote-code review, and environment checks, including how to see which packages are already installed.
+The requirements pin torchvision to the reference pairing (torch 2.11.0 / torchvision 0.26.0) and leave torch out, so an existing torch is reused. On a fresh image without torch, pip resolves the matching torch as a dependency of torchvision; the dry run shows what it would add and how large the download is. If the board has a different torch, change the torchvision pin to match it instead of replacing torch.
 
-<a id="4-first-model-in-five-minutes"></a>
+The [System One example](../examples/system-one-decision/README.md) covers the pinned snapshot, the remote-code review, and `check_env.py`.
 
 ## 4. Stage your model
 
-Teams receive **USB drives with model assets** and have been asked to bring **USB-C dongles/adapters**. Ask: **“Do you have your supplied USB model drive and a suitable USB-C adapter? Is it connected to the board or your laptop?”** Prefer existing board assets first, then compatible USB assets; model downloads are a separately approved fallback, not the default.
+Teams receive **USB drives with model assets** and were asked to bring **USB-C adapters**. Use what is already on the board first, then the USB drive. A download is the fallback, not the default.
 
-The cache/import commands below apply to the GenieX reference route. For ZETIC, use the [separate SDK/v73 staging recipe](../examples/zetic-lfm/README.md#stage-once-with-approval); do not import its packages into GenieX.
+These commands are for the GenieX route. ZETIC has its [own staging recipe](../examples/zetic-lfm/README.md#stage-once-with-approval).
 
-Inspect the cache, disk, and existing local model directories before copying/importing or downloading anything:
+Check the cache and disk first, on the **board**:
 
 ```bash
 geniex --skip-update list
@@ -357,10 +344,11 @@ df -h /
 
 ### USB model drive: copy, never move
 
-1. **Discover, do not guess.** On the board, inspect existing block devices/mounts with `lsblk -o NAME,TRAN,SIZE,FSTYPE,LABEL,MOUNTPOINTS` and `findmnt`. Have the participant identify their drive and use the observed mount path. Ask before mounting an unmounted drive or changing configuration; prefer read-only source access. If it is attached to the laptop, inspect it there and plan an approved copy over the confirmed SSH link—laptop and board mount paths are different. Do not format the drive or repurpose a cable carrying the active control session. A storage dongle does not establish USB-C networking or internet access.
-2. **Select and budget.** Inspect the chosen model's directory, manifest/file list, format, precision, license, and runtime/NPU compatibility; do not copy the entire drive just because it contains all models. Resolve source/destination paths and inspect symlinks. Include matching tokenizer, template, model code, and modality assets. For the reference generator, select LFM3-1.7B **QAD-Q4_0 GGUF**, not an arbitrary d1 GGUF or a different precision. Check board free space for the full import and any intermediate copy.
-3. **Get approval for explicit source and destination paths. Copy, never move.** Leave all USB source files intact: no `mv`, source deletion after import, `rsync --remove-source-files`, destructive `--delete` sync, or edits to the supplied drive. Preserve unrelated board files and back up any approved replacements. Do not manually populate/edit GenieX cache metadata.
-4. **Import a missing generator from the selected local directory.** With approval and the matching cached model absent, use the installed CLI's local import. Replace the path below with the **observed** model directory, not the drive root:
+The drive is the event's supplied media: **copy from it, never move, edit, or delete anything on it.** That means no `mv`, no `rsync --remove-source-files`, no `--delete` sync, and no formatting.
+
+1. **Find the drive.** On the board: `lsblk -o NAME,TRAN,SIZE,FSTYPE,LABEL,MOUNTPOINTS` and `findmnt`. Use the mount path you observe, mounted read-only if you mount it yourself. If the drive is in the laptop instead, copy over SSH; laptop and board paths differ.
+2. **Pick one model, not the whole drive.** For the reference generator that is the LFM3-1.7B **QAD-Q4_0 GGUF** directory, with its tokenizer and template files. Check that the board has room for the import.
+3. **Import it into the GenieX cache** when `geniex list` does not already show the model. Replace the path with the model directory you found, not the drive root:
 
    ```bash
    MODEL_USB_DIR='/actual/mounted/path/to/LFM3-model-directory'
@@ -369,27 +357,27 @@ df -h /
    geniex --skip-update list
    ```
 
-   `--local-path` copies into the GenieX cache (default `~/.cache/geniex/models`) without downloading weights; `--model-hub localfs` makes the source explicit. The [GenieX CLI reference](https://geniex.aihub.qualcomm.com/en/run/cli/reference#geniex-pull) documents this copy behavior. **Do not delete the USB source**, even though general upstream guidance permits removing a source after import. If a laptop-side source must be copied to a new board staging directory first, budget for both that copy and the cache import. Never re-import an already-registered model.
-5. **If using optional d1**, copy the **entire pinned Transformers snapshot** to `~/models/d1-2B`, including weights, configs, tokenizer, model code, and `REVISION`; a GGUF is not a substitute. Inspect any cache-style symlinks and copy their verified targets into board-local files, without retaining links to removable media. Do not merge into an existing snapshot blindly or change the revision pin to match the drive. Follow the [d1 skill](../skills/iq9-d1-decision-gate/SKILL.md).
-6. **Verify, then run locally.** Retain the copy/import log and exit status, verify expected files and sizes/checksums against the source or supplied manifest, and confirm cache registration or the d1 revision. Run long copies/imports in a separate terminal. Stage everything on board storage, not on the drive: after approved safe ejection, verify startup without it. For the generator, send a capped useful request and inspect the current server's `HTP0` evidence. **USB staging is not yet board-rehearsed in this repo; documentation and CLI checks do not prove a successful media import.**
+   `--local-path` copies into the cache (`~/.cache/geniex/models`) without downloading ([CLI reference](https://geniex.aihub.qualcomm.com/en/run/cli/reference#geniex-pull)). Do not edit the cache by hand, and never re-import a model that is already registered.
+4. **If using d1,** copy the **entire pinned Transformers snapshot** to `~/models/d1-2B`: weights, configs, tokenizer, model code, and `REVISION`. A GGUF is not a substitute. Copy real files, not symlinks back to the drive, and do not change the revision pin to match the drive. See the [d1 skill](../skills/iq9-d1-decision-gate/SKILL.md).
+5. **Verify.** Compare file sizes or checksums with the source, confirm `geniex list` (or the d1 `REVISION`), then eject the drive and confirm the app starts without it. For the generator, send a capped request and check the current server's `HTP0` line.
 
-If suitable assets are absent from the cache, board/laptop local files, and the supplied USB drive (or the drive is unavailable), explain the gap and obtain approval before downloading during setup:
+If the model is not in the cache, on the board, or on the drive, download it during setup:
 
 ```bash
 geniex --skip-update pull LiquidAI/LFM3-1.7B-GGUF:Q4_0
 ```
 
-Never re-pull cached models or fetch/import weights on application startup.
+Never pull or import weights when the app starts.
 
 ## 5. Local server (OpenAI-compatible)
 
-Run the foreground server in a separate terminal:
+On the **board**, run the server in its own terminal:
 
 ```bash
 bash skills/iq9-geniex-lfm/scripts/serve.sh run
 ```
 
-The reference server uses `127.0.0.1:18181`, NPU compute, and a long keepalive. It serves cached models without downloading them. Send a capped request from another terminal on the board:
+It listens on `127.0.0.1:18181`, uses the NPU with a long keepalive, serves cached models only, and logs to `~/geniex-serve.log`. From another board terminal:
 
 ```bash
 curl -sS --max-time 60 http://127.0.0.1:18181/v1/chat/completions \
@@ -402,66 +390,65 @@ curl -sS --max-time 60 http://127.0.0.1:18181/v1/chat/completions \
     "enable_think": false,
     "stream": false
   }'
+bash skills/iq9-geniex-lfm/scripts/serve.sh status    # prints the HTP0 device line
 ```
 
 * Cap every chat call with `max_completion_tokens`; use `max_tokens` on raw completions.
-* Inspect answer content and reasoning separately. Positive token usage does not make an empty answer usable.
-* For direct LFM3-1.7B answers, try `enable_think: false` or the helper's closed-reasoning raw template. Keep output validation either way.
-* Tag raw prompts before the first call and retry unusable output once. Return persistent errors as data.
-* Plan for idle unloading and warm up with a capped request before the demo. See [Server lifecycle](runtimes.md#server-lifecycle-model-loading-and-idle-unloading).
-* Do not bind to non-loopback addresses or interrupt shared servers without approval.
+* Check the answer content. A reply can report tokens and still be empty or reasoning-only.
+* For direct LFM3-1.7B answers, try `enable_think: false` or the client's `sentence()` template.
+* Tag raw prompts so they are unique, retry unusable output once, and return persistent errors as data.
+* The model unloads when idle. Warm it up with a capped request before the demo; see [server lifecycle](runtimes.md#server-lifecycle-model-loading-and-idle-unloading).
+* Keep the server on loopback.
 
-The standard-library [LFM client](../skills/iq9-geniex-lfm/scripts/lfm_client.py) provides these GenieX request guards. [Runtime reference](runtimes.md) describes endpoints and fields. ZETIC does not use this server/client; its [one-shot wrapper](../examples/zetic-lfm/run.py) caps the vendor CLI, validates text/usage/device evidence, and returns errors as data.
+The standard-library [LFM client](../skills/iq9-geniex-lfm/scripts/lfm_client.py) implements these guards; copy it into your app. [Runtime reference](runtimes.md) lists endpoints and fields. ZETIC does not use this server; its [wrapper](../examples/zetic-lfm/run.py) applies the same guards to the vendor CLI.
 
 ## 6. The decision layer
 
-If using d1-2B, run a pinned local snapshot through Transformers in fp32 on the CPU. Load once and reuse it. Set offline/telemetry settings before imports and pass `local_files_only=True` to the loader.
+A rule in code is the simplest gate, and the [always-on example](../examples/always-on-agent/README.md) runs with one (`--gate rule`).
 
-The [decision-layer reference](decision-models.md) includes loading, typed questions, and calibration. The runnable [System One example](../examples/system-one-decision/README.md) shows state, image, and batch calls.
+If you use d1-2B, run the pinned local snapshot through Transformers in fp32 on the CPU. Load it once and reuse it. Set the offline settings before the imports and pass `local_files_only=True`. Do not route it through GenieX's decision endpoints, and a d1 GGUF does not replace the snapshot. d1 returns zero output tokens by design, unlike an empty LFM reply.
 
-Do not route this reference d1 integration through GenieX decision endpoints. A d1 GGUF does not replace the Transformers snapshot. Zero generated output tokens are expected for d1, unlike an empty LFM-generation response.
+The [decision-layer reference](decision-models.md) covers loading, typed questions, and calibration. The [System One example](../examples/system-one-decision/README.md) shows state, image, and batch calls.
 
 ## 7. Choosing a model
 
-Choose based on task, format, precision, runtime/NPU support, and available memory. Any LFM3-family model is welcome; other LFM models are options too. LFM3-1.7B is the examples' default, not an eligibility rule.
+Choose on task, format, precision, runtime/NPU support, and memory. Any LFM3-family model is welcome and other LFM models are options; LFM3-1.7B is the examples' default, not an eligibility rule.
 
-Use a rule instead of d1 when a local threshold is enough. For vision or audio, stage the matching assets and use the modality's API. External sensors are optional; local images, recordings, or simulated events can serve as inputs.
-
-Browse [LiquidAI's published models](../README.md#platform-and-models), then check [format, precision, and runtime compatibility](runtimes.md#model-format-and-precision). The example READMEs explain their reference choices; re-test your selected model on the board rather than transferring their results.
+For vision or audio, stage the matching assets and use that modality's API. Browse [LiquidAI's published models](../README.md#platform-and-models), check [format, precision, and runtime compatibility](runtimes.md#model-format-and-precision), and test your model on the board; the reference results do not carry over.
 
 ## 8. Building an always-on agent
 
 The reference loop is **observe -> decide -> act -> explain -> log**.
 
-1. **Generate only when needed.** Use a decision gate or rule before invoking the LFM for an explanation.
-2. **Calibrate on the app's task.** Fit thresholds on labeled states and evaluate separately on held-out data.
+1. **Generate only when needed.** A rule or decision gate runs before the LFM is asked for an explanation.
+2. **Calibrate on the app's task.** Fit thresholds on labeled states and evaluate on held-out data.
 3. **Constrain actions.** Schemas, allowlists, and write-action policy belong in code.
 4. **Log each iteration.** Flush JSONL with the observation, decision, executed action, explanation, timing, and errors.
 5. **Cap and validate output.** Empty answers, reasoning alone, and zero LFM tokens are failures even when the HTTP request succeeds.
-6. **Keep the loop alive.** Input and explanation failures become logged data; avoid unhandled exceptions inside a monitor.
-7. **Keep inference sequential.** Do not overlap d1 and the generator without evaluating a changed scheduling design on the app's workload.
+6. **Keep the loop alive.** Input, decision, and explanation failures become logged data, not crashes.
+7. **Keep inference sequential.** Do not overlap d1 and the generator without measuring the change.
 
-Start from [Always-on agent](../examples/always-on-agent/README.md), or create an app using the [scaffold](../skills/iq9-always-on-agent/SKILL.md). Use bounded iterations and simulated inputs while adapting it.
+Start from [Always-on agent](../examples/always-on-agent/README.md), or create an app with the [scaffold](../skills/iq9-always-on-agent/SKILL.md). Use bounded iterations and simulated inputs while adapting it.
 
 ## 9. Tool calling
 
-Send OpenAI-style function schemas in `tools` to `/v1/chat/completions`. Validate returned call envelopes, IDs, names, and arguments before executing anything.
+Send OpenAI-style function schemas in `tools` to `/v1/chat/completions`. Validate the returned call envelopes, IDs, names, and arguments before executing anything.
 
-The model proposes; code decides. Apply a policy before every write or real-world action, and report executed actions from the app's own records rather than the model's prose. Keep the tool list short and the number of turns bounded. A token budget is not a guarantee that the model chooses a valid tool.
+The model proposes; code decides. Apply a policy before every write or real-world action, and report executed actions from the app's own records, not the model's prose. Keep the tool list short and the number of turns bounded.
 
-The [tool-calling example](../examples/tool-calling/README.md) includes schema, allowlist, policy, execution, and local guard checks.
+The [tool-calling example](../examples/tool-calling/README.md) includes the schema, allowlist, policy, execution, and local guard checks.
 
 ## 10. Measuring performance
 
-Choose an observation interval and token budget based on the app's workload. Include cold startup, warm requests, decision latency, loop time, memory, and error rate.
+Measure your own workload: cold startup, warm requests, decision latency, loop time, memory, and error rate.
 
-For server requests, use the [metrics collector](../skills/iq9-demo-prep/scripts/collect_metrics.sh). It separates generated-output TTFT from answer TTFT and labels streamed decode timing as an estimate. Do not count SSE chunks as tokens.
+For server requests, use the [metrics collector](../skills/iq9-demo-prep/scripts/collect_metrics.sh). It separates first generated output from first answer content and labels streamed decode timing as an estimate. Do not count SSE chunks as tokens.
 
-The collector's default prompt asks for **one sentence**, so its numbers describe short answers. Short-answer runs are dominated by prefill and TTFT, so they understate sustained decode speed. For your app's workload, pass `--prompt` with a representative request. For long answers, set `--max-tokens` as a generous **safety cap** and check that `finish_reason` is `stop` rather than `length`; a capped run measures the cap, not the answer. Report decode tok/s and end-to-end tok/s separately, and keep the warm-up out of the medians (the collector already does). See the [demo-prep skill](../skills/iq9-demo-prep/SKILL.md#2-numbers-measure-them-never-quote-the-docs-as-your-own).
+The collector's default prompt asks for **one sentence**, so its numbers describe short answers, which are dominated by prefill and understate sustained decode speed. Pass `--prompt` with a representative request. For long answers, set `--max-tokens` as a generous safety cap and check that `finish_reason` is `stop`, not `length`: a capped run measures the cap. Report decode tok/s and end-to-end tok/s separately. See the [demo-prep skill](../skills/iq9-demo-prep/SKILL.md#2-numbers-measure-them-never-quote-the-docs-as-your-own).
 
-For ZETIC, use the [example's JSONL timing records](../examples/zetic-lfm/README.md#measurements-and-verified-scope), not the GenieX HTTP collector. Keep runtime-reported generation TTFT/decode separate from CLI wall time and model loading; compare quantizations, output lengths, and instrumentation as well as tok/s.
+For ZETIC, use the [example's JSONL timing records](../examples/zetic-lfm/README.md#measurements-and-verified-scope), and keep model loading separate from generation.
 
-For a local GGUF benchmark, stage `geniex-bench` matching the runtime, then point it at the actual file:
+For a local GGUF benchmark, stage the `geniex-bench` that matches the runtime and point it at the file:
 
 ```bash
 D="$HOME/geniex-bench-linux-arm64-v0.10.0"
@@ -470,32 +457,34 @@ export LD_LIBRARY_PATH="$D/lib:$D/lib/llama_cpp:$D/lib/qairt"
   -m /absolute/path/to/model.gguf -r 5 -p 512 -n 128
 ```
 
-This command selects five runs, a 512-token prefill, and 128 generated tokens. It does not time d1; time `system_one()` separately for the app's exact questions. Process RSS, peak process RSS, and device memory are different resources.
+That is five runs, a 512-token prefill, and 128 generated tokens. It does not time d1; time `system_one()` separately with the app's own questions. Process RSS, peak RSS, and device memory are different resources.
 
-Put app results in the app's README with the board, runtime, model/precision, workload, sample count, and medians. Keep this shared reference focused on setup and APIs.
+Put results in the app's README with the board, runtime, model/precision, workload, sample count, and medians.
 
 ## 11. Running offline
 
-Stage the chosen models, packages, UI assets, docs, and sample data before the cut. At runtime, load local snapshots/cache entries only; do not install packages, pull models, send telemetry, or fetch remote assets.
+Stage models, packages, UI assets, docs, and sample data before the cut. At runtime, load local snapshots and cache entries only.
 
-Rehearse cold startup and the core workflow with all external uplinks disconnected. A configured, isolated USB-C link may remain for SSH and an app web UI, with no laptop internet sharing/forwarding. Get approval before cutting the network; use a working local console or a tested isolated USB-C SSH session, not SSH over the uplink being cut. See [display and USB-C access](offline-readiness.md#display-and-usb-c-access).
+Rehearse cold startup and the core workflow with every external uplink disconnected. An isolated USB-C link may stay up for SSH and an app web UI, with no internet sharing from the laptop. Before cutting the network, have a control path that does not depend on it: UART or the USB-C link, not SSH over the uplink being cut.
 
 Full checklist: [Offline readiness](offline-readiness.md).
 
 ## 12. Troubleshooting
 
-| Symptom                                                      | What to inspect                                         | Next step                                                                                                                                      |
-| ------------------------------------------------------------ | ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| `geniex: command not found`                                  | Installed CLI path and shell `PATH`                     | Use the existing install or follow approved setup; do not reinstall blindly                                                                    |
-| External monitor/GPU-driver issue after an Adreno APT update | Installed Adreno package versions and update history    | With approval, remove/roll back the update using the organizers' board-specific procedure; SSH/USB-C web UI is an alternative. See section 3.2 |
-| Missing NPU libraries                                        | Driver packages and loader error                        | Install only missing packages with approval; do not reinstall/update Adreno as a generic NPU fix. See section 3.2                              |
-| CDSP permission denied                                       | Read **and** write on each node; `fastrpc` group        | Follow [NPU device access](#npu-device-access) with approval; reconnect SSH and restart the server from the new login                          |
-| Slow generator or no HTP0 output                             | Current server log, compute route, drivers, permissions | Diagnose NPU access without silently changing compute                                                                                          |
-| Long or reasoning-only answer                                | Token cap, prompt template, answer/reasoning fields     | Keep the cap, try direct-answer controls, and validate usable content                                                                          |
-| Empty answer or zero LFM tokens                              | Response body, prompt uniqueness, cap                   | Retry once with a fresh tag; log persistent failure before safely relaunching the owned server                                                 |
-| d1 request sent to a server endpoint                         | Integration route                                       | Call `model.system_one()` locally through Transformers on the CPU                                                                              |
-| Slower first or post-idle request                            | Weight loading and keepalive                            | Plan cold/warm startup and adjust keepalive for quiet gaps                                                                                     |
-| Benchmark cannot find libraries                              | Archive layout and `LD_LIBRARY_PATH`                    | Set paths to the matching local benchmark libraries                                                                                            |
-| No space left on device                                      | Cache, snapshots, archives, duplicate copies            | Ask the owner before removing unused files                                                                                                     |
-| Python import fails                                          | Selected interpreter, venv, package versions            | Inspect the environment before changing or recreating it                                                                                       |
-| d1 loader requests code approval                             | Snapshot revision and loader options                    | Review local model code before enabling `trust_remote_code=True`                                                                               |
+| Symptom | What to inspect | Next step |
+| --- | --- | --- |
+| `geniex: command not found` | Installed CLI path and shell `PATH` | Add `~/.local/bin` to `PATH`, or install per section 3.3 |
+| External monitor stops working after an APT update | Installed Adreno package versions | See [Developer Notes](../README.md#external-monitors-and-headless-setups); SSH and a USB-C web UI still work |
+| Missing NPU libraries | Driver packages and the loader error | Install only the missing packages (section 3.2); leave Adreno alone |
+| CDSP permission denied | Read **and** write on each node; `fastrpc` group | Follow [NPU device access](#npu-device-access); reconnect SSH and restart the server |
+| Package download returns 404 | APT index age | Follow [stale APT lists](#stale-apt-lists-and-package-file-404s) |
+| Slow generator or no `HTP0` line | Current server log, compute route, drivers, permissions | Diagnose NPU access; do not silently change compute |
+| `serve.sh status` shows no device line | Whether a capped request has run; the log path | Send a capped request; check `~/geniex-serve.log` or `GENIEX_SERVE_LOG` |
+| Long or reasoning-only answer | Token cap, prompt template, answer/reasoning fields | Keep the cap, try direct-answer controls, validate the content |
+| Empty answer or zero LFM tokens | Response body, prompt uniqueness, cap | Retry once with a fresh tag; log persistent failures, then restart your server |
+| d1 request sent to a server endpoint | Integration route | Call `model.system_one()` locally through Transformers |
+| Slower first or post-idle request | Weight loading and keepalive | Plan for cold starts and raise the keepalive |
+| Benchmark cannot find libraries | Archive layout and `LD_LIBRARY_PATH` | Point the paths at the matching benchmark libraries |
+| No space left on device | Cache, snapshots, archives, duplicate copies | Ask before removing files; never delete from the USB drive |
+| Python import fails | Interpreter, venv, package versions | Inspect the environment before recreating it |
+| d1 loader requests code approval | Snapshot revision and loader options | Review the local model code before `trust_remote_code=True` |

@@ -4,11 +4,40 @@
 
 Reference documentation for the hackathon: build on-device AI agents with **LiquidAI** models on the **Qualcomm Dragonwing IQ-9075 EVK**, then demonstrate them with the network removed.
 
+**Event page:** [luma.com/0nsdnkoa](https://luma.com/0nsdnkoa) for the schedule, venue, and logistics. **Submitting:** see [how to submit](docs/judging.md#how-to-submit).
+
+## The evening
+
+November 13, 2026, San Francisco, 5:00–9:00 PM Pacific. Teams of up to four. The event page is the source of truth if anything here differs.
+
+| Time | What happens |
+| --- | --- |
+| 5:00 PM | Doors open, food, networking |
+| 6:00 PM | On-device AI workshop |
+| 6:15 PM | Building starts |
+| 8:00 PM | Submissions open |
+| 8:15 PM | Building ends. The Wi-Fi goes off for the showcase, judging, and awards |
+
+## Two hours, from a fresh board
+
+Boards start with a fresh Ubuntu install and nothing else, and the build window is two hours. A plan that fits; the times are targets, not measurements:
+
+| By | Goal | How |
+| --- | --- | --- |
+| 7:00 | First NPU response | One person starts setup at once: [board shell](docs/developer-guide.md#0-board-access-and-internet-for-setup) → [NPU packages and `fastrpc`](docs/developer-guide.md#32-driver-packages) → [GenieX](docs/developer-guide.md#33-geniex-cli) → [model from the USB drive](docs/developer-guide.md#4-stage-your-model) → [server and first request](docs/developer-guide.md#5-local-server-openai-compatible). Everyone else reads an example and sketches the app |
+| 7:45 | Your app's loop works | Start from the [always-on agent](examples/always-on-agent/README.md) with `--gate rule`, or from [tool calling](examples/tool-calling/README.md). Change the input, the rule, the action, and the prompt |
+| 8:00 | It works with Wi-Fi off | Set up your offline control path **while Wi-Fi is still on**: a USB-C link to the laptop, or the UART console you used for setup. Then run the app once with the board's Wi-Fi disconnected; see [display and USB-C access](docs/offline-readiness.md#display-and-usb-c-access) |
+| 8:15 | Submitted | A GitHub repository link and an Arduino Project Hub post; see [how to submit](docs/judging.md#how-to-submit) |
+
+**Minimum for a demo:** the core loop runs on the board with Wi-Fi off, its JSONL log shows what it decided and did, and you can answer "why not a cloud API call?".
+
+**Only if you have time:** the d1 gate and its calibration, the metrics collector, a long network-off rehearsal, and the ZETIC route.
+
 > **Start here:** [`docs/developer-guide.md`](docs/developer-guide.md). Using a coding agent? Open this repo in your agent and use the prompt below. [`AGENTS.md`](AGENTS.md) and the [getting-started skill](skills/iq9-getting-started/SKILL.md) guide it through access, setup, and verification.
 
 ## Get started with your agent
 
-> Let's get started with this repo on my IQ9. Read `AGENTS.md` and `docs/developer-guide.md`.
+> Let's get started with this repo on my IQ9. Read `AGENTS.md` and `docs/developer-guide.md`. We have about two hours in total, so take the shortest path and skip optional extras.
 >
 > First, help me access the board and get it connected to the internet for setup. Ask what connections I have available and guide me through any manual steps.
 >
@@ -23,8 +52,8 @@ No SSH connection yet? Start with the board's **micro-USB debug UART**, then con
 * **Hardware:** Dragonwing IQ-9075 EVK only (QCS9075, Hexagon v73 NPU, 36 GB LPDDR5). External sensors are optional and will not be provided; participants are welcome to bring their own.
 * **Generator and tools:** Choose **any model in LiquidAI's LFM3 family** that fits your project.
 * **Reference generator:** This repo's examples use `LiquidAI/LFM3-1.7B-GGUF` (Q4_0) via GenieX v0.10.0—a starting point, not a required model.
-* **Optional ZETIC route:** [Ixian Hexagon SDK 0.2.1 and the IQ9 collection](examples/zetic-lfm/README.md), with a capped CLI wrapper for LFM3-1.7B, VL, Audio, and Omni text/image/WAV → text, plus guidance for the vendor's separate d1 API. Earlier SDK 0.1.0 text/Omni checks passed while connected; the current SDK/packages and network-off startup remain unverified on our board.
-* **Optional decision layer:** `LiquidAI/d1-2B`, a decision model that answers typed questions in one pass with no output tokens.
+* **Optional ZETIC route:** [Ixian Hexagon SDK 0.2.1 and the IQ9 collection](examples/zetic-lfm/README.md), with a capped CLI wrapper for LFM3 text/image/WAV → text. SDK 0.2.1 and the current packages have been run on the IQ-9075; see the example for its verified scope.
+* **Optional decision layer:** `LiquidAI/d1-2B`, a decision model that answers typed questions in one pass with no output tokens. A rule in code works too.
 
 Start with [LiquidAI's LFM3 family on Hugging Face](https://huggingface.co/collections/LiquidAI/lfm3), then review each model's card and file list. Other LFM models are also options. The example READMEs explain their reference choices.
 
@@ -64,26 +93,26 @@ Judging weights and the "why not just a cloud API call?" question are in [`docs/
 | `docs/developer-guide.md`       | Main guide: setup → first model → server → decision and generation loop → offline                                                                                              |
 | `docs/decision-models.md`       | d1-2B: question types and Transformers on the IQ-9075 CPU                                                                                                                                |
 | `docs/runtimes.md`              | GenieX versions, CLI, server endpoints and request fields, benchmarking, pitfalls                                                                                              |
-| `docs/hardware.md`              | IQ-9075 facts, team board state, driver packages                                                                                                                               |
+| `docs/hardware.md`             | IQ-9075 facts, expected software, quick checks                                                                                                                                 |
 | `docs/offline-readiness.md`     | Pre-cut checklist and network-off rehearsal                                                                                                                                    |
 | `docs/judging.md`               | Scoring rubric, demo format, metrics to show                                                                                                                                   |
 | `examples/system-one-decision/` | `system_one()` with Transformers on the CPU. Installation, pinned fetch, environment check, example.                                                                              |
 | `examples/lfm-server-npu/`      | LFM3-1.7B: send a capped, validated request to an existing NPU server; lifecycle stays in a separate terminal                                                                   |
 | `examples/zetic-lfm/`          | Optional ZETIC Ixian CLI: capped LFM3 text/image/audio → text, collection coverage, separate d1 guidance, staging, and verification limits                                         |
-| `examples/always-on-agent/`     | The always-on loop, runnable: observe, decide (d1), act through an allowlist, explain alerts (LFM, raw completion), log to JSONL                                               |
+| `examples/always-on-agent/`     | The always-on loop, runnable: observe, decide (a rule, or d1), act through an allowlist, explain alerts (LFM), log to JSONL. Runs without d1                                    |
 | `examples/tool-calling/`        | LFM3-1.7B: native `tools` calls, schema validation, allowlist, and a policy check before any write action                                                                      |
 | `starter/`                      | `run.sh`: checks the board, runs one decision pass and one generation, and points to the next example                                                                          |
 | `skills/`                       | Agent skills with tested scripts: preflight, GenieX/LFM client, d1 calibration, agent scaffold, tool calling, offline audit, demo metrics. Start with [`AGENTS.md`](AGENTS.md) |
 | `AGENTS.md`                     | Instructions for coding agents: rules, skills, where to run, what to ask before doing                                                                                          |
-| `apps/`                         | Where hackathon projects go (`skills/iq9-always-on-agent/scripts/scaffold.sh apps/<name>`)                                                                                     |
+| `apps/`                         | Where hackathon projects go (`skills/iq9-always-on-agent/scripts/scaffold.sh apps/<name>`); their logs and metrics are not git-ignored                                         |
 
-**Start from working examples:** First complete [generator setup and verification](skills/iq9-getting-started/SKILL.md#5-verify-the-first-generator-milestone), without requiring d1. Then explore model requests, a local agent, or guarded tool calling. `./starter/run.sh` is an optional **full two-model reference check** after setting up both LFM and d1, not the first onboarding step.
+**Start from working examples:** First complete [generator setup and verification](skills/iq9-getting-started/SKILL.md#5-verify-the-first-generator-milestone), without requiring d1. Then explore model requests, the [always-on agent](examples/always-on-agent/README.md) (`--gate rule` needs no d1), or guarded tool calling. `./starter/run.sh` is an optional **full two-model reference check** after setting up both LFM and d1, not the first onboarding step.
 
 ## Developer Notes
 
 ### External monitors and headless setups
 
-**Organizer-reported setup issue:** the current Adreno APT update causes a GPU-driver issue when using an external monitor on the IQ-9075. Teams using a monitor must **remove/roll back the Adreno APT update** before using that setup. This repo's setup recipes no longer recommend installing/updating `qcom-adreno1`. Check installed versions and confirm the removal/rollback procedure with the organizers and board owner before changing drivers; the affected/fixed package versions are not recorded here.
+**Organizer-reported setup issue:** the current Adreno APT update causes a GPU-driver issue when using an external monitor on the IQ-9075. Teams using a monitor must **remove/roll back the Adreno APT update** before using that setup. This repo's setup recipes no longer recommend installing/updating `qcom-adreno1`. Check installed versions and confirm the removal/rollback procedure with the organizers before changing drivers; the affected/fixed package versions are not recorded here.
 
 **SSH is not affected by this monitor issue.** A headless setup using SSH and an app web server over a configured **USB-C network link** is allowed during the network-off demo. Keep the link local-only: disable internet sharing/forwarding on the laptop and remove all external uplinks. Serve UI assets locally and keep inference on the board. See [display and USB-C access](docs/offline-readiness.md#display-and-usb-c-access) for the checklist and SSH port forwarding.
 
@@ -120,7 +149,7 @@ python3 skills/iq9-geniex-lfm/scripts/lfm_client.py --sentence 'Explain why loca
 skills/iq9-geniex-lfm/scripts/serve.sh status
 ```
 
-Check the answer and the current server's `HTP0` log line; a preflight pass alone is not verification. See the [generator skill](skills/iq9-geniex-lfm/SKILL.md) for server reuse and output guards. If your project needs d1, set it up separately with [`examples/system-one-decision`](examples/system-one-decision/README.md); it is optional.
+Check the answer and the `HTP0` device line that `serve.sh status` prints from `~/geniex-serve.log`; a preflight pass alone is not verification. See the [generator skill](skills/iq9-geniex-lfm/SKILL.md) for server reuse and output guards. If your project needs d1, set it up separately with [`examples/system-one-decision`](examples/system-one-decision/README.md); it is optional.
 
 For local image/audio projects or an alternative text route, see the [ZETIC example](examples/zetic-lfm/README.md) and [why it is included](docs/developer-guide.md#25-optional-zetic-route). It uses separate SDK/model assets, not the GenieX cache or OpenAI-compatible endpoints.
 

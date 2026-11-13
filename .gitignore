@@ -2,9 +2,14 @@ __pycache__/
 *.pyc
 .venv/
 venv/
-*.jsonl
 *.log
+
+# Run output from the reference examples. Projects under apps/ keep theirs: labeled calibration data,
+# decision logs, and metrics are the evidence a submission shows.
+*.jsonl
 metrics.json
+!apps/**/*.jsonl
+!apps/**/metrics.json
 .DS_Store
 
 # Local onboarding/session scratch (not shared guidance)

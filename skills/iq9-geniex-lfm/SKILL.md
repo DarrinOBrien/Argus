@@ -10,14 +10,14 @@ metadata:
 
 Start with the [reference-stack rules](../../README.md#rules-for-the-reference-stack); [Runtimes](../../docs/runtimes.md) gives format, precision, and API guidance. LFM3-1.7B is a reference default, not a required participant model; verify any chosen model's template, format, NPU support, and task behavior.
 
-**Missing NPU packages:** use the [driver setup guide](../../docs/developer-guide.md#32-driver-packages) with approval, refreshing existing APT sources and simulating only the missing packages before installation. Package-file `404 Not Found` errors can come from stale image indexes; follow [stale APT recovery](../../docs/developer-guide.md#stale-apt-lists-and-package-file-404s), not a broad upgrade, new PPA, `--fix-missing`, or Adreno change. Record the actual installed package/runtime versions and verify current-server `HTP0`; refreshed QAIRT candidates alone do not establish compatibility.
+**Missing NPU packages:** follow the [driver setup guide](../../docs/developer-guide.md#32-driver-packages) and, for package-file `404 Not Found` errors, [stale APT recovery](../../docs/developer-guide.md#stale-apt-lists-and-package-file-404s). Then verify the current server's `HTP0` line.
 
 ## 1. Server
 
 Commands below run from the repo root. Use a **separate terminal** for the foreground server and keep its output visible. Do not send input into a busy terminal or the agent's own terminal.
 
 ```bash
-skills/iq9-geniex-lfm/scripts/serve.sh run       # foreground; NPU, 1800 s, ./geniex-serve.log
+skills/iq9-geniex-lfm/scripts/serve.sh run       # foreground; NPU, 1800 s, ~/geniex-serve.log
 # In another terminal:
 skills/iq9-geniex-lfm/scripts/serve.sh status
 skills/iq9-geniex-lfm/scripts/serve.sh stop      # only when safe to interrupt this server
@@ -26,15 +26,15 @@ skills/iq9-geniex-lfm/scripts/serve.sh stop      # only when safe to interrupt t
 `start`/`restart` retain the detached runner for compatibility. Use them only with an agreed logged runner. For a foreground restart, stop the owned server and run `run` again in its terminal; do not silently replace it with a detached job.
 
 - The server listens on loopback only, at `127.0.0.1:18181`, and never downloads models.
-- **Headless demo:** SSH is unaffected by the organizer-reported Adreno monitor issue. Keep GenieX on loopback and use SSH port forwarding for a board-hosted app web UI over a configured, isolated USB-C network link; disable laptop internet sharing/forwarding. Monitor setups must remove/roll back the Adreno APT update with approval, not reinstall/update `qcom-adreno1` as a generic NPU fix. See [Developer Notes](../../README.md#external-monitors-and-headless-setups) and [USB-C access](../../docs/offline-readiness.md#display-and-usb-c-access).
+- **Headless demo:** keep GenieX on loopback and use SSH port forwarding for a board-hosted web UI over an isolated USB-C link ([USB-C access](../../docs/offline-readiness.md#display-and-usb-c-access)). The [monitor issue](../../README.md#external-monitors-and-headless-setups) does not affect SSH.
 - `kill $!` does not stop it, because `geniex` is a launcher. `serve.sh stop` stops the process that holds the port. Never use `pkill -f "geniex serve"` over SSH; it also matches the SSH command itself.
 - **Cold start:** the first request loads weights. Measure the chosen model's cold/reload time.
 - **Idle unload:** the model unloads after `--keepalive` seconds idle (300 s by default). `serve.sh` sets 1800 s. Before a demo, send one warm-up request.
-- **Is the NPU in use?** With `--log info`, the log shows `Using 1 device(s): HTP0`. `serve.sh status` prints that line. Send a capped request first and verify that the log belongs to this server. A missing `HTP0` line calls for investigation, not a CPU-fallback conclusion; see `docs/developer-guide.md` §12. `geniex infer` is interactive, so don't run it from an agent.
+- **Is the NPU in use?** With `--log info`, the log shows `Using 1 device(s): HTP0`. `serve.sh status` prints that line from `~/geniex-serve.log` (or `GENIEX_SERVE_LOG`) from any directory, and says so when the log or the line is missing. Send a capped request first; `run`/`start` replace the log, so it belongs to the server that script started. A missing `HTP0` line calls for investigation, not a CPU-fallback conclusion; see `docs/developer-guide.md` §12. `geniex infer` is interactive, so don't run it from an agent.
 
 ## 2. Requests: always use `scripts/lfm_client.py`
 
-Copy `scripts/lfm_client.py` into the app, or import it. It uses only the standard library.
+Copy `scripts/lfm_client.py` into the app, or import it. It uses only the standard library. The always-on example and its scaffold use it; `examples/tool-calling` keeps its own `response_error()` with the same checks so that file stands alone.
 
 ```python
 from lfm_client import LFM
@@ -64,11 +64,11 @@ The default idle timeout is 300 s; `--keepalive` and `GENIEX_KEEPALIVE` both cha
 
 ## 4. Picking a model
 
-Run `geniex list`, inspect existing local weight directories, and check `df -h /` first. **Ask whether the participant has the supplied USB model drive and USB-C dongle/adapter before proposing a download.** Reuse registered models without another import; for missing models, prefer compatible USB/local assets and follow [USB model staging](../../docs/developer-guide.md#usb-model-drive-copy-never-move).
+Check `geniex list`, local weight directories, and `df -h /` first, and reuse registered models. For a missing model, use the supplied USB drive before any download and follow [USB model staging](../../docs/developer-guide.md#usb-model-drive-copy-never-move): copy, never move.
 
-**Ask before every copy, pull, or local import. Copy, never move:** import the selected model directory with `geniex --skip-update pull <name>:<precision> --model-hub localfs --local-path <observed-directory>`. This copies into the cache without downloading weights; leave the USB source intact. Do not manually populate/edit GenieX cache metadata, use `mv` or destructive sync, or delete the source after import. Include the matching tokenizer/template/modality assets and allow space for any intermediate copy. Verify cache registration and copied file sizes/checksums, then a capped useful response and current-server `HTP0`. Run long imports in a separate terminal.
+**Ask before every copy, pull, or local import.** Import the selected model directory with `geniex --skip-update pull <name>:<precision> --model-hub localfs --local-path <observed-directory>`, which copies into the cache without downloading. Then verify cache registration, a capped useful response, and the current server's `HTP0` line.
 
-Only propose a separately approved download if compatible board/local/USB assets are unavailable. Never re-pull cached weights or run `geniex clean`/`geniex remove` without approval. Cached registered model names are allowed in inference requests; runtime downloads are not.
+Download only when no compatible copy exists on the board or the drive. Never re-pull cached weights or run `geniex clean`/`geniex remove` without approval. Cached model names are fine in inference requests; runtime downloads are not.
 
 Use [README: Platform and models](../../README.md#platform-and-models) to find LiquidAI's published models, not a fixed shortlist. The examples default to `LiquidAI/LFM3-1.7B-GGUF:Q4_0`; other LFM3-family and LFM models are options. Check the selected model's [format, precision, and compute route](../../docs/runtimes.md#model-format-and-precision), and stage its [full matching asset set](../../docs/offline-readiness.md#disk-first). Vision and audio require supported modality-specific request handling. Re-test NPU execution, usable answers, and tool calls on the board for the chosen configuration.
 

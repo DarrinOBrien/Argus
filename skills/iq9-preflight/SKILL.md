@@ -32,31 +32,29 @@ Select `--profile generator` or `--profile reference` instead when that stack ha
 ## Reading the result
 
 - `FAIL` means a check required by the **selected profile** failed. `WARN` needs investigation; neither `ready: true` nor a WARN guarantees the app works end to end. The JSON records `profile`, `model`, and individual checks.
-- Show suggested fixes. **Ask before** system changes, any `geniex pull` (including local imports), `fetch_d1.py`, model deletion, or runtime installation. Inspect `geniex list`, existing local weights/snapshots, and `df -h /` first. A missing cache registration does not prove the weights are absent. Ask whether the participant has the supplied USB model drive and a USB-C dongle/adapter; prefer an approved **copy/import, never a move**, before proposing a download. Follow [USB model staging](../../docs/developer-guide.md#usb-model-drive-copy-never-move). Preflight does not mount media, copy models, or verify USB contents.
-- Preflight does **not** check APT index freshness or whether candidate package files are still available. Before approved package setup, refresh existing sources and simulate the missing-package install. For package-file `404 Not Found` errors, follow [stale APT recovery](../../docs/developer-guide.md#stale-apt-lists-and-package-file-404s); do not add sources, use `--fix-missing`, or upgrade Adreno as a workaround. Keep this recovery outside the read-only preflight script.
+- Show suggested fixes, and ask before acting on them. Check `geniex list`, local weights/snapshots, and `df -h /` first: a missing cache registration does not prove the weights are absent. For a missing model, use the supplied USB drive before a download ([USB model staging](../../docs/developer-guide.md#usb-model-drive-copy-never-move)). Preflight does not mount media, copy models, or verify USB contents.
+- Preflight does **not** check APT index freshness. For package-file `404 Not Found` errors during setup, follow [stale APT recovery](../../docs/developer-guide.md#stale-apt-lists-and-package-file-404s).
 - The external HTTPS probe is informational and is reported as `ok` whether it succeeds or fails. A failed probe may mean an unreachable endpoint, not an offline board; neither result proves online setup readiness or a physical network-off rehearsal. Use the guide's [board-side setup connectivity checks](../../docs/developer-guide.md#03-check-internet-access-from-the-board) when preparing downloads/installations.
 
 | Check | What it means when it isn't ok |
 |---|---|
-| `display` WARN | Always emitted in every profile: monitor compatibility is not checked. This is the Adreno setup warning, not a detected display failure; see the display guidance below |
+| `display` WARN | Always emitted in every profile: monitor compatibility is not checked. A reminder about the [monitor issue](../../README.md#external-monitors-and-headless-setups), not a detected display failure |
 | `npu-nodes`, `npu-access` | `npu-access` requires **read and write** on every non-secure CDSP node; readable-only nodes still fail in GenieX. The fix hint distinguishes a missing `fastrpc` group (FastRPC package/rules not installed), a user not yet in the group, and a member who still lacks access. Follow [NPU device access](../../docs/developer-guide.md#npu-device-access) with approval; group changes need a **new** login/SSH session. Do not install/update Adreno as a generic NPU fix or infer CPU execution from this check alone. A pass is not NPU verification: still send a capped request and check the current server's `HTP0` line |
 | `geniex` WARN | The version differs from v0.10.0, so the LFM3 path may not hold. Don't change versions between rehearsal and demo |
-| `model:<selected name>` | The selected model is not registered. Inspect cache/local weights and ask about the supplied USB drive; copy/import compatible assets with approval, never move them or re-download cached weights |
+| `model:<selected name>` | The selected model is not registered. Check local weights and the supplied USB drive, then import with approval ([USB model staging](../../docs/developer-guide.md#usb-model-drive-copy-never-move)); never re-download cached weights |
 | `d1-venv`, `d1-snapshot` | Required only by the reference profile. Follow `examples/system-one-decision/README.md` if this app uses d1 |
 | `server` WARN | Normal if nothing has started it yet. See the `iq9-geniex-lfm` skill |
 | `disk` WARN | Under 10 GB free. Run `geniex list` and ask the user before removing anything |
 
 ## Display and control path
 
-Organizers report that the current Adreno APT update causes a GPU-driver issue with external monitors. For a monitor setup, **remove/roll back that update** using the organizers' board-specific procedure and owner approval; do not blindly purge packages or reinstall/update `qcom-adreno1`. See [Developer Notes](../../README.md#external-monitors-and-headless-setups). Every profile includes a `display` WARN in both text and JSON output, even when all required checks pass. This does not fail the run or mean a broken monitor was detected: the script does not test the display or identify affected package versions. `ready: true` is not proof of monitor compatibility or recovery.
+Every profile prints a `display` WARN, in text and JSON, even when all required checks pass. The script does not test the display or detect affected package versions, so the WARN does not fail the run and `ready: true` says nothing about monitors. The issue is described in [Developer Notes](../../README.md#external-monitors-and-headless-setups), and the installer caveat in [driver setup](../../docs/developer-guide.md#32-driver-packages).
 
-The upstream `install_ppa_pkgs.sh` linked from the developer guide is **not adapted for this event's monitor issue**. Do not run it unchanged for a monitor setup until organizers confirm the graphics changes to omit or roll back. No event-specific patched installer is provided; see [driver setup](../../docs/developer-guide.md#32-driver-packages).
-
-SSH is unaffected. An isolated, configured USB-C network link can carry SSH and a board-hosted app web UI during the network-off demo. Test it before cutting external uplinks, disable laptop internet sharing/forwarding, and keep the inference listener on loopback. See [display and USB-C access](../../docs/offline-readiness.md#display-and-usb-c-access).
+SSH is unaffected. For a headless demo over an isolated USB-C link, see [display and USB-C access](../../docs/offline-readiness.md#display-and-usb-c-access).
 
 ## Deeper checks (on request)
 
 - **Full d1 check:** from the repo root, run `~/.venvs/d1/bin/python examples/system-one-decision/check_env.py`.
 - **Reference smoke test:** `./starter/run.sh`. It uses both reference models; measure elapsed time rather than promising a fixed duration.
-- **Is the generator using the NPU?** In a separate terminal, run `skills/iq9-geniex-lfm/scripts/serve.sh run`, send a capped request, then inspect `serve.sh status` and the current server log. Look for `Using 1 device(s): HTP0`; a missing line is a reason to investigate, not proof of CPU fallback. Do not silently switch to CPU.
+- **Is the generator using the NPU?** In a separate terminal, run `skills/iq9-geniex-lfm/scripts/serve.sh run`, send a capped request, then run `serve.sh status`, which prints the device line from `~/geniex-serve.log`. Look for `Using 1 device(s): HTP0`; a missing line is a reason to investigate, not proof of CPU fallback. Do not silently switch to CPU.
 - Reference-stack rules: [README Developer Notes](../../README.md#rules-for-the-reference-stack).

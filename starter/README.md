@@ -2,14 +2,14 @@
 
 This optional check exercises the board, d1 decision layer, and LFM generator after **both models** have been set up. It also leaves a decision log. It is not a fresh-board installer or the first onboarding step, and no fixed run time is promised.
 
-For board access, setup internet, and a first **generator-only** response, start with the [getting-started skill](../skills/iq9-getting-started/SKILL.md) and [developer guide](../docs/developer-guide.md#0-board-access-and-internet-for-setup). d1 is optional for projects but required by this particular script, including with `--skip-lfm`.
+For board access, setup internet, and a first **generator-only** response, start with the [getting-started skill](../skills/iq9-getting-started/SKILL.md) and [developer guide](../docs/developer-guide.md#0-board-access-and-internet-for-setup). d1 is optional for projects but required by this particular script, including with `--skip-lfm`. Without d1, skip it and run the [always-on example](../examples/always-on-agent/README.md) with `--gate rule`.
 
 ```bash
 ./starter/run.sh              # board checks, one d1-2B decision pass, one LFM3-1.7B generation
 ./starter/run.sh --skip-lfm   # same, without the generator
 ```
 
-It downloads nothing. If something is missing, it stops and prints the command that fixes it.
+It downloads nothing. If something is missing, it stops and prints what to do next.
 
 ## Before you run it
 
@@ -18,8 +18,8 @@ One-time setup, done while the network is up:
 | Needed | Set up with |
 |---|---|
 | GenieX v0.10.0 and the NPU driver packages | [`docs/developer-guide.md` §3](../docs/developer-guide.md#3-setup) |
-| `LiquidAI/LFM3-1.7B-GGUF:Q4_0` in the GenieX cache | Inspect `geniex list`, local weights, and disk first. If absent, get approval for an import/download; see [model staging](../docs/developer-guide.md#4-stage-your-model). Never re-pull cached weights. |
-| The d1 venv `~/.venvs/d1` and the snapshot `~/models/d1-2B` | [`examples/system-one-decision`](../examples/system-one-decision/README.md#install) |
+| `LiquidAI/LFM3-1.7B-GGUF:Q4_0` in the GenieX cache | If absent, import it from the supplied USB model drive; see [model staging](../docs/developer-guide.md#4-stage-your-model). |
+| The d1 venv `~/.venvs/d1` and the snapshot `~/models/d1-2B` | [`examples/system-one-decision`](../examples/system-one-decision/README.md#install); copy the snapshot from the USB drive when it is there |
 
 d1-2B runs through transformers from a local snapshot in this repo, so it does not need to appear in `geniex list`.
 
@@ -29,7 +29,7 @@ Unless using `--skip-lfm`, reuse an appropriate running server or start this in 
 bash skills/iq9-geniex-lfm/scripts/serve.sh run
 ```
 
-The starter leaves that server running. Stop only an owned server when safe, using the [generator skill](../skills/iq9-geniex-lfm/SKILL.md#1-server).
+The starter leaves that server running. Stop it when you are done, using the [generator skill](../skills/iq9-geniex-lfm/SKILL.md#1-server).
 
 Override the defaults with `D1_PYTHON=/path/to/python` and `D1_MODEL_DIR=/path/to/d1-2B`.
 

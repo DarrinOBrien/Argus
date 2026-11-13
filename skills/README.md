@@ -1,6 +1,6 @@
 # Skills
 
-Agent skills for building on the Dragonwing IQ-9075 with LiquidAI models. Each folder holds a `SKILL.md` (frontmatter in the [Agent Skills](https://agentskills.io/specification) format, plus instructions) and supporting scripts (the tool-calling skill uses its example directly). Reference behavior has dated IQ9 evidence; revised helper behavior must pass local regression and bounded board integration checks before being called board-verified. Latest reference results are in [README Developer Notes](../README.md#developer-notes).
+Agent skills for building on the Dragonwing IQ-9075 with LiquidAI models. Each folder holds a `SKILL.md` (frontmatter in the [Agent Skills](https://agentskills.io/specification) format, plus instructions) and supporting scripts (the tool-calling skill uses its example directly). Setup warnings and reference-stack rules are in [README Developer Notes](../README.md#developer-notes).
 
 | Skill | Scripts |
 |---|---|
@@ -15,9 +15,10 @@ Agent skills for building on the Dragonwing IQ-9075 with LiquidAI models. Each f
 
 ## Using them
 
-For first-time access, setup internet, or an unknown board state, start with [`iq9-getting-started`](iq9-getting-started/SKILL.md). It coordinates the guide, preflight, and generator skills; it is not an unattended installer. The guided onboarding flow is not yet board-rehearsed.
+For first-time access, setup internet, or an unknown board state, start with [`iq9-getting-started`](iq9-getting-started/SKILL.md). It coordinates the guide, preflight, and generator skills; it is not an unattended installer.
 
 - **Claude Code** finds them in `.claude/skills/`. **Codex, pi, and other agents** that follow the `.agents/skills/` convention find them there. Both folders are symlinks to this one.
+- **Windows:** a clone without symlink support leaves those two entries as small text files. Clone with `git clone -c core.symlinks=true <url>` (needs Developer Mode or an elevated shell), or point your agent at `skills/` and `AGENTS.md` directly.
 - **Any other agent:** `AGENTS.md` at the repo root links every skill. You can also point the agent at a `SKILL.md` directly.
 - To use them across projects, symlink a skill folder into your agent's user skills folder (for example `~/.claude/skills/` or `~/.agents/skills/`).
 

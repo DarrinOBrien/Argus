@@ -7,6 +7,7 @@
 Scans .py .js .ts .mjs .html .sh .json .toml .yaml .yml files for:
   hub-id      from_pretrained("org/name") / snapshot_download / hf_hub_download / pipeline("...", model="org/name")
               with a repo id instead of a local path
+  local-only  from_pretrained(...) without local_files_only=True on the call
   pull        `geniex pull` or `pip install` inside app code (should happen before the cut)
   url         http(s) URLs to anything other than localhost / 127.0.0.1
   cdn         <script src=http...> / <link href=http...> / @import url(http...) in UI files
@@ -77,6 +78,11 @@ def scan(paths):
                 rid = m.group(2)
                 if not rid.startswith((".", "/", "~")):
                     findings.append(("error", "hub-id", f, i, f"loads '{rid}' by repo id; use a local path"))
+            # The call may wrap, so look a few lines ahead for the argument.
+            if f.endswith(".py") and "from_pretrained(" in line and \
+                    "local_files_only=True" not in " ".join(lines[i - 1:i + 3]):
+                findings.append(("warn", "local-only", f, i,
+                                 "from_pretrained() without local_files_only=True; a local path can still reach the Hub"))
             if (PULL_SH if is_script else PULL_PY).search(line):
                 findings.append(("error", "pull", f, i, s[:160]))
             for level, kind, rx in RULES:
@@ -104,7 +110,7 @@ def main():
         print(json.dumps([{"level": l, "kind": k, "file": f, "line": n, "detail": d} for l, k, f, n, d in fs], indent=1))
     else:
         for l, k, f, n, d in fs:
-            print(f"[{l:5}] {k:9} {f}:{n}  {d}")
+            print(f"[{l:5}] {k:10} {f}:{n}  {d}")
         errors = sum(1 for x in fs if x[0] == "error")
         print(f"{errors} error(s), {sum(1 for x in fs if x[0] == 'warn')} warning(s)")
     sys.exit(1 if any(x[0] == "error" for x in fs) else 0)

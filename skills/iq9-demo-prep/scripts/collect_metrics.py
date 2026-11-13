@@ -156,7 +156,7 @@ def main():
             server_pid = line.split("pid=", 1)[1].split(",", 1)[0]
             break
     rss = sh("ps", "-o", "rss=", "-p", server_pid) if server_pid else ""
-    log_path = Path(os.environ.get("GENIEX_SERVE_LOG", str(Path.cwd() / "geniex-serve.log")))
+    log_path = Path(os.environ.get("GENIEX_SERVE_LOG", str(Path.home() / "geniex-serve.log")))  # serve.sh default
     device_line = None
     try:
         if log_path.is_file():

@@ -1,17 +1,17 @@
 # Judging and Demos
 
-Use this rubric to plan the project and its demo. If the organizers' brief differs, follow the brief.
+Use this rubric to plan the project and its demo. If the organizers' brief differs, follow the brief. The date, schedule, and venue are on the [event page](https://luma.com/0nsdnkoa).
 
 ## How to submit
 
-Submit your project between **8:00–8:30 p.m.** by completing the [event submission form](https://submissions.loggia.sh/events/cleared-for-takeoff).
+Submit between **8:00 and 8:30 p.m. Pacific on November 13, 2026** through the [event submission form](https://submissions.loggia.sh/events/cleared-for-takeoff). Building ends and judging starts at 8:15 p.m.
 
 Your submission must include **both**:
 
-- A link to your project's **GitHub repository**.
-- A link to your **Arduino Project Hub submission**.
+- A link to your project's **GitHub repository**. Fork this repo and build under [`apps/`](../apps/README.md), or use a repository of your own; either works. The judges need to be able to open it.
+- A link to your project on the **[Arduino Project Hub](https://projecthub.arduino.cc/)**. Post your entire project there, the write-up and the code, not only a link back to GitHub. Posting needs an Arduino account, so sign in before the window opens.
 
-Have both links ready before the submission window opens.
+Have both links ready before 8:00 p.m.
 
 ## Scoring
 
@@ -26,7 +26,7 @@ Have both links ready before the submission window opens.
 
 ## The first question
 
-Every finalist gets this question: **"Why should this not simply be a cloud API call?"**
+Expect this question: **"Why should this not simply be a cloud API call?"**
 
 Prepare an answer that names a specific constraint. Examples: the network is unavailable, the data is sensitive, the reaction must happen in under a second, or the marginal cost has to stay flat at scale. Being on-device is not an answer by itself.
 

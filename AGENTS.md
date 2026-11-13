@@ -1,20 +1,21 @@
 # AGENTS.md
 
-Instructions for coding agents helping teams at the **On-Device AI Hackathon: Cleared for Takeoff** (LiquidAI × Qualcomm Dragonwing).
+Instructions for coding agents helping teams at the **On-Device AI Hackathon: Cleared for Takeoff** (LiquidAI × Qualcomm Dragonwing). Schedule and logistics: [event page](https://luma.com/0nsdnkoa). Submission steps: [docs/judging.md](docs/judging.md#how-to-submit).
 
 ## Project and constraints
 
 Docs and examples for the **Dragonwing IQ-9075 EVK**, Ubuntu 24.04 aarch64. Start with the [developer guide](docs/developer-guide.md); consult [Developer Notes](README.md#developer-notes) for setup warnings and reference-stack rules.
 
 - **Reference generator:** `LiquidAI/LFM3-1.7B-GGUF:Q4_0`, GenieX **v0.10.0**, NPU, `127.0.0.1:18181`.
-- **Optional ZETIC route:** read [the ZETIC example](examples/zetic-lfm/README.md) before using Ixian Hexagon SDK 0.2.1 with the public IQ9 packages. Its wrapper supports the four LFM3 generators' text/image/WAV → text paths as applicable, only on two-NSP `v73`. The collection also offers a separate native d1 Decision API, not integrated into the Python examples. The current SDK/packages are not board-verified here. Keep this separate from GenieX; do not import ZETIC packages into its cache.
+- **Optional ZETIC route:** read [the ZETIC example](examples/zetic-lfm/README.md) before using Ixian Hexagon SDK 0.2.1 with the public IQ9 packages. Its wrapper supports the four LFM3 generators' text/image/WAV → text paths as applicable, only on two-NSP `v73`. The collection also offers a separate native d1 Decision API, not integrated into the Python examples. SDK 0.2.1 and the current packages have been run on the board; still check each request's output and device evidence. Keep this separate from GenieX; do not import ZETIC packages into its cache.
 - **Optional decision gate:** `LiquidAI/d1-2B`, Transformers on the CPU, local snapshot at `~/models/d1-2B`.
-- These are defaults, not eligibility restrictions. Any LFM3-family model is welcome; other LFM models are options. Verify the chosen model's format, runtime, NPU support, and task behavior. A rule can replace d1.
+- These are defaults, not eligibility restrictions. Any LFM3-family model is welcome; other LFM models are options. Verify the chosen model's format, runtime, NPU support, and task behavior. A rule can replace d1: the always-on example runs without d1 using `--gate rule`.
 - **Model media:** teams receive USB drives with model assets and have been asked to bring USB-C dongles/adapters. Ask whether the participant has the supplied drive and a suitable adapter before proposing model downloads. **Copy/import models onto board storage; never move them or delete/modify the source drive.** See [USB model staging](docs/developer-guide.md#usb-model-drive-copy-never-move).
+- **Time budget:** the build window is two hours and boards start with a fresh Ubuntu install only. Take the shortest path: first NPU response, a working app loop, a tested offline control path, then submission ([plan](README.md#two-hours-from-a-fresh-board)). Treat d1 and its calibration, the metrics collector, long rehearsals, recovery staging, and ZETIC as extras: propose them only when the team asks or has time. Put the whole setup in one plan for one approval rather than asking step by step, shorten checks to fit, and say what was skipped.
 - External sensors are optional and not supplied. Use brought sensors, board readings, local files, or simulated inputs.
 - **Final demos run without external network access.** An isolated USB-C link may carry SSH and a board-hosted web UI, without laptop internet sharing/forwarding. Keep UI assets local and inference on the board; see [offline access](docs/offline-readiness.md#display-and-usb-c-access).
 
-**Monitor warning:** with owner approval, remove/roll back the organizer-reported Adreno APT update for external monitors. SSH is unaffected. Do not install/update `qcom-adreno1` as a generic NPU fix; confirm rollback with organizers ([details](README.md#external-monitors-and-headless-setups)).
+**Monitor warning:** organizers report that the current Adreno APT update causes a GPU-driver issue with external monitors; SSH is unaffected. Do not install/update `qcom-adreno1` as a generic NPU fix, and confirm any rollback with the organizers ([details](README.md#external-monitors-and-headless-setups)).
 
 ## Before board work
 
@@ -45,7 +46,7 @@ Docs and examples for the **Dragonwing IQ-9075 EVK**, Ubuntu 24.04 aarch64. Star
 
 6. **Get approval before changes:** system/runtime installation or upgrades; model copies/downloads/imports/removal (`geniex pull/remove/clean`, `fetch_d1.py`); changing the d1 revision pin or user configuration (including network, account, and SSH settings); deleting user files; non-loopback server binding; or network cuts. This includes laptop serial-tool/driver installation. Review snapshot code before enabling `trust_remote_code`.
 
-7. **Protect shared boards:** inspect resolved paths and symlinks before deletion, back up replaced board files, and preserve unrelated files. Do not interrupt shared servers without permission. Before a network cut, establish a tested local console or isolated USB-C control link and restoration plan.
+7. **Protect the board:** inspect resolved paths and symlinks before deletion, back up replaced board files, and preserve unrelated files. Do not stop a server you did not start without permission. Before a network cut, establish a tested local console or isolated USB-C control link and restoration plan.
 
 ## Choose the relevant skill
 

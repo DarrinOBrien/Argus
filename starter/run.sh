@@ -14,7 +14,12 @@ D1_MODEL_DIR="${D1_MODEL_DIR:-$HOME/models/d1-2B}"
 LFM="LiquidAI/LFM3-1.7B-GGUF"
 LOG="$REPO_ROOT/starter/demo_log.jsonl"
 SKIP_LFM=0
-[ "${1:-}" = "--skip-lfm" ] && SKIP_LFM=1
+case "${1:-}" in
+  "") ;;
+  --skip-lfm) SKIP_LFM=1 ;;
+  --help|-h) echo "usage: starter/run.sh [--skip-lfm]   (run on the IQ-9075 after LFM and d1 setup; downloads nothing)"; exit 0 ;;
+  *) echo "unknown flag: $1 (usage: starter/run.sh [--skip-lfm])" >&2; exit 64 ;;
+esac
 
 fail() { echo "FAIL: $1"; echo "  fix: $2"; exit 1; }
 
@@ -28,7 +33,7 @@ echo "    disk free on /: $(df -h / | awk 'NR==2 {print $4}')"
 
 echo "==> 2. Decision layer (d1-2B, Transformers on CPU)"
 [ -x "$D1_PYTHON" ] || fail "no d1 venv at $D1_PYTHON" "follow examples/system-one-decision/README.md (Install)"
-[ -d "$D1_MODEL_DIR" ] || fail "no d1 snapshot at $D1_MODEL_DIR" "$D1_PYTHON examples/system-one-decision/fetch_d1.py --dest $D1_MODEL_DIR"
+[ -d "$D1_MODEL_DIR" ] || fail "no d1 snapshot at $D1_MODEL_DIR" "copy the pinned snapshot from the supplied USB model drive (docs/developer-guide.md §4); fetch_d1.py is the approved download fallback"
 (cd "$REPO_ROOT/examples/system-one-decision" && "$D1_PYTHON" check_env.py) \
   || fail "check_env.py reported a problem" "read the [FAIL] lines above"
 
@@ -41,7 +46,9 @@ if [ "$SKIP_LFM" -eq 1 ]; then
   echo "==> 4. Skipped LFM check (--skip-lfm)"
 else
   echo "==> 4. One generation (LFM3-1.7B on the NPU)"
-  geniex list | grep -q "$LFM" || fail "$LFM is not in the GenieX cache" "geniex pull $LFM:Q4_0"
+  # Capture first: with pipefail, grep -q closing the pipe early can look like a missing model.
+  cached="$(geniex list 2>/dev/null || true)"
+  grep -q "$LFM" <<<"$cached" || fail "$LFM is not in the GenieX cache" "import it from the supplied USB model drive (docs/developer-guide.md §4); a download is the approved fallback"
   # Requires a foreground server in another terminal; never manages shared servers.
   (cd "$REPO_ROOT/examples/lfm-server-npu" && python3 serve_lfm_npu.py --max-tokens 48)
 fi

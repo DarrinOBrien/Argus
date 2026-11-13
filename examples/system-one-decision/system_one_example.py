@@ -11,13 +11,19 @@ can show. The alert threshold is an example value. Tune it on states you have la
 
 import argparse
 import json
+import os
 import pathlib
 import time
 from datetime import datetime, timezone
 
-import torch
-from PIL import Image, ImageDraw
-from transformers import AutoModel
+# Offline at runtime: set these before the Transformers import, and load with local_files_only=True.
+os.environ["HF_HUB_OFFLINE"] = "1"
+os.environ["TRANSFORMERS_OFFLINE"] = "1"
+os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"
+
+import torch  # noqa: E402
+from PIL import Image, ImageDraw  # noqa: E402
+from transformers import AutoModel  # noqa: E402
 
 ALERT_THRESHOLD = 0.5  # example value: tune on your own labeled states
 
@@ -80,8 +86,10 @@ def main() -> None:
     dtype = {"float32": torch.float32, "bfloat16": torch.bfloat16}[args.dtype]
 
     model_dir = pathlib.Path(args.model_dir).expanduser()
+    if not model_dir.is_dir():
+        raise SystemExit(f"d1 snapshot not found at {model_dir}. See README.md (Install); nothing is downloaded here.")
     load_start = time.perf_counter()
-    model = AutoModel.from_pretrained(str(model_dir), trust_remote_code=True, dtype=dtype)
+    model = AutoModel.from_pretrained(str(model_dir), trust_remote_code=True, local_files_only=True, dtype=dtype)
     model = model.to("cpu").eval()
     print(f"loaded {model_dir} as {args.dtype} in {time.perf_counter() - load_start:.1f} s, "
           f"threads={torch.get_num_threads()}")

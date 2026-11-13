@@ -3,50 +3,45 @@
 
 Each iteration:
   1. observe   read the board's own telemetry (SoC thermal zones, CPU load) by default
-  2. decide    d1-2B gate (Transformers, CPU, fp32) returns p_alert, category, severity
+  2. decide    --gate d1 (default): d1-2B (Transformers, CPU, fp32) returns p_alert, category, severity
+               --gate rule: a threshold rule in code; needs no d1 venv, torch, or snapshot
   3. act       choose an action; only allowlisted actions run, anything else is refused
-  4. explain   only when the action is log_alert: LFM3-1.7B (GenieX, NPU) writes one sentence.
-               Uses a raw completion with the reasoning block closed, because the chat path
-               returns reasoning text (see README).
-  5. log       one JSON line per iteration
+  4. explain   only when the action is log_alert: LFM3-1.7B (GenieX, NPU) writes one sentence through
+               lfm_client.py (capped raw completion, reasoning block closed, validated, one retry)
+  5. log       one flushed JSON line per iteration; sensor, gate, and explanation errors are logged too
 
-This reference loop uses d1; other apps may use a rule or another decision design. The loop is
-sequential: d1 slows down substantially while the LFM generates.
-Re-measure the chosen configuration before changing the scheduling policy.
+The loop is sequential: d1 slows down substantially while the LFM generates. Re-measure the chosen
+configuration before changing the scheduling policy.
 
-Requires: a GenieX server on --server with the --llm model cached, and the d1-2B snapshot
-at --model-dir (see examples/system-one-decision/README.md).
+Requires a GenieX server on --server with the --llm model cached. --gate d1 also needs the d1 venv and
+the snapshot at --model-dir (see examples/system-one-decision/README.md); --gate rule runs on python3.
 """
 
 import argparse
 import collections
+import importlib
 import json
 import os
 import random
 import signal
 import sys
 import time
-import urllib.error
-import urllib.request
-import uuid
 from datetime import datetime, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(HERE, "..", "system-one-decision"))
+# scaffold.sh copies both helpers next to the app and rewrites these two lines.
+LFM_CLIENT_DIR = os.path.join(HERE, "..", "..", "skills", "iq9-geniex-lfm", "scripts")
+D1_QUESTIONS = (os.path.join(HERE, "..", "system-one-decision"), "system_one_example")
 
-os.environ["HF_HUB_OFFLINE"] = "1"
-os.environ["TRANSFORMERS_OFFLINE"] = "1"
-os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"
-
-import torch  # noqa: E402
-from transformers import AutoModel  # noqa: E402
-from system_one_example import SENSOR_QUESTIONS  # noqa: E402  (alert, category, severity)
+sys.path.insert(0, LFM_CLIENT_DIR)
+from lfm_client import LFM  # noqa: E402  (capped requests, output checks, one retry, errors as data)
 
 # Only these actions can run. Anything else is refused and logged.
 ALLOWED_ACTIONS = ("no_op", "log_alert")
 EXPLAIN_TIMEOUT_S = 60
 THERMAL_ROOT = "/sys/class/thermal"
 HISTORY_S = 300
+SYSTEM_LINE = "You write one-sentence alerts for operators. Reply with the sentence only."
 
 
 def now_iso():
@@ -54,7 +49,7 @@ def now_iso():
 
 
 class BoardTelemetry:
-    """The board's own temperatures from sysfs (IQ-9075: about 36 thermal zones). No extra hardware.
+    """The board's own temperatures from sysfs thermal zones. No extra hardware.
 
     Observation: the hottest zone now, the same value about one minute ago, and the 1-minute CPU load.
     The 1-minute value is the sample closest to 60 s ago. Until 60 s of history exists, it is the oldest sample.
@@ -108,39 +103,95 @@ class BoardTelemetry:
 
 
 def read_sensors(mode, rng, telemetry=None):
-    """The loop's observation. 'board' reads the SoC telemetry (default).
+    """The loop's observation. Every mode returns the same keys, so gates and prompts see one shape.
 
-    'simulated' returns random states. 'fixed' repeats one hot state for diagnostics.
+    'board' reads the SoC telemetry (default). 'simulated' returns random states and 'fixed' repeats
+    one hot state; both are for tests.
     """
     if mode == "board":
         return telemetry.read()
     if mode == "fixed":
-        return {"temp_c": 71.5, "temp_c_1min_ago": 58.0, "motion": "none"}
+        return {"soc_temp_c": 71.5, "soc_temp_c_1min_ago": 58.0, "cpu_load_1min": 0.5, "hottest_zone": "fixed"}
     if rng.random() < 0.5:
         t = round(rng.uniform(34, 40), 1)
         prev = round(t + rng.uniform(-0.5, 0.5), 1)
-        motion = "none"
     else:
         t = round(rng.uniform(65, 80), 1)
         prev = round(rng.uniform(50, 62), 1)
-        motion = rng.choice(["none", "sudden 2.1 g spike"])
-    return {"temp_c": t, "temp_c_1min_ago": prev, "motion": motion}
+    return {"soc_temp_c": t, "soc_temp_c_1min_ago": prev, "cpu_load_1min": round(rng.uniform(0.1, 4.0), 2),
+            "hottest_zone": "simulated"}
 
 
-def decide(model, obs):
+# ---- decision gates: each returns a dict with "gate", "alert", "category", and "gate_ms" -------------
+
+def load_d1(model_dir):
+    """Load d1-2B once and return its decide(obs, threshold) function.
+
+    torch and Transformers are imported here, not at module level, so --gate rule needs neither.
+    """
+    os.environ["HF_HUB_OFFLINE"] = "1"  # before the Transformers import
+    os.environ["TRANSFORMERS_OFFLINE"] = "1"
+    os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"
+    try:
+        import torch
+        from transformers import AutoModel
+        sys.path.insert(0, D1_QUESTIONS[0])
+        questions = importlib.import_module(D1_QUESTIONS[1]).SENSOR_QUESTIONS  # alert, category, severity
+    except ImportError as e:
+        sys.exit(f"--gate d1 needs the d1 venv ({e}). Run with ~/.venvs/d1/bin/python, "
+                 "or use --gate rule to run without d1.")
+    if not os.path.isdir(model_dir):
+        sys.exit(f"d1 snapshot not found at {model_dir}. See examples/system-one-decision/README.md, "
+                 "or use --gate rule to run without d1.")
+    model = AutoModel.from_pretrained(model_dir, trust_remote_code=True, local_files_only=True,
+                                      dtype=torch.float32)
+    model = model.to("cpu").eval()
+
+    def decide(obs, threshold):
+        t0 = time.perf_counter()
+        with torch.inference_mode():
+            a = model.system_one(json.dumps(obs), questions)["answers"]
+        p_alert = float(a["alert"]["noul"])  # Preserve precision for calibration and policy.
+        return {
+            "gate": "d1",
+            "p_alert": p_alert,
+            "alert": p_alert >= threshold,
+            "category": a["category"]["choice"],
+            "severity": round(a["severity"]["score"], 3),
+            "gate_ms": round((time.perf_counter() - t0) * 1000, 1),
+        }
+
+    return decide, f"d1-2B fp32 on CPU, threads={torch.get_num_threads()}"
+
+
+def rule_decide(obs, limit_c, rise_c):
+    """--gate rule: alert when the temperature or its one-minute rise reaches a limit. No model."""
     t0 = time.perf_counter()
-    with torch.inference_mode():
-        a = model.system_one(json.dumps(obs), SENSOR_QUESTIONS)["answers"]
+    temp = obs["soc_temp_c"]
+    rise = round(temp - obs["soc_temp_c_1min_ago"], 1)
+    reasons = []
+    if temp >= limit_c:
+        reasons.append(f"temperature {temp} C is at or above the {limit_c} C limit")
+    if rise >= rise_c:
+        reasons.append(f"rose {rise} C in one minute (limit {rise_c} C)")
     return {
-        "p_alert": float(a["alert"]["noul"]),  # Preserve precision for calibration and policy.
-        "category": a["category"]["choice"],
-        "severity": round(a["severity"]["score"], 3),
+        "gate": "rule",
+        "alert": bool(reasons),
+        "category": "thermal" if reasons else "normal",
+        "reason": "; ".join(reasons) or "within limits",
         "gate_ms": round((time.perf_counter() - t0) * 1000, 1),
     }
 
 
-def choose_action(decision, threshold):
-    return "log_alert" if decision["p_alert"] >= threshold else "no_op"
+def choose_action(decision):
+    return "log_alert" if decision["alert"] else "no_op"
+
+
+def describe(decision):
+    """The gate's evidence, for the console line: a probability (d1) or the rule that fired."""
+    if "p_alert" in decision:
+        return f"p_alert={decision['p_alert']:.3f}"
+    return f"rule: {decision['reason']}"
 
 
 def run_action(name, decision):
@@ -148,91 +199,41 @@ def run_action(name, decision):
     if name not in ALLOWED_ACTIONS:
         return f"refused:{name}"
     if name == "log_alert":
-        print(f"  ALERT category={decision['category']} severity={decision['severity']} "
-              f"p_alert={decision['p_alert']}", flush=True)
+        print(f"  ALERT category={decision['category']} {describe(decision)}", flush=True)
     return name
 
 
-# LFM3-1.7B enables reasoning by default, and a cap can cut the chat reply before the answer. A raw
-# completion with an empty <think></think> block already closed asks for the sentence directly. The
-# system line and template are the model's ChatML tokens.
-SYSTEM_LINE = "You write one-sentence alerts for operators. Reply with the sentence only."
-TEMPLATE = ("<|startoftext|><|im_start|>system\n" + SYSTEM_LINE + "<|im_end|>\n"
-            "<|im_start|>user\n{USER}<|im_end|>\n"
-            "<|im_start|>assistant\n<think>\n\n</think>\n\n")
+def build_prompt(obs, decision):
+    # Only stable decision fields go in the prompt; gate_ms would make every prompt unique by accident.
+    d = {k: decision[k] for k in ("p_alert", "category", "severity", "reason") if k in decision}
+    return ("Explain this alert to an operator in one sentence. "
+            f"Observation: {json.dumps(obs)}. Decision: {json.dumps(d)}.")
 
 
-def build_prompt(obs, decision, stable_prompt, tag=None):
-    # Only these three decision fields go in the prompt. gate_ms would make every prompt unique by accident.
-    d = {k: decision[k] for k in ("p_alert", "category", "severity")}
-    p = ("Explain this alert to an operator in one sentence. "
-         f"Observation: {json.dumps(obs)}. Decision: {json.dumps(d)}.")
-    if tag or not stable_prompt:
-        p += f" [request:{tag or uuid.uuid4().hex}]"
-    return p
-
-
-def complete(server, model_name, user_text, max_tokens):
-    body = json.dumps({
-        "model": model_name,
-        "prompt": TEMPLATE.replace("{USER}", user_text),
-        "max_tokens": max_tokens,
-        "compute": "npu",
-        "stream": False,  # one JSON reply per call
-    }).encode()
-    req = urllib.request.Request(server.rstrip("/") + "/v1/completions", data=body,
-                                 headers={"Content-Type": "application/json"})
-    t0 = time.perf_counter()
-    with urllib.request.urlopen(req, timeout=EXPLAIN_TIMEOUT_S) as r:
-        d = json.load(r)
-    choice = d["choices"][0]
-    return {
-        "text": (choice.get("text") or "").strip(),
-        "tokens": d.get("usage", {}).get("completion_tokens", 0),
-        "finish": choice["finish_reason"],
-        "ms": round((time.perf_counter() - t0) * 1000, 1),
-    }
-
-
-def explain(server, model_name, obs, decision, max_tokens, stable_prompt):
-    """Retry zero-token or empty-answer output once; log persistent failure without restarting."""
-    out = {"ok": False, "retried": False, "zero_token_first_try": False,
-           "empty_response_first_try": False,
-           "text": None, "tokens": 0, "finish": None, "ms": None, "error": None}
-    try:
-        r = complete(server, model_name, build_prompt(obs, decision, stable_prompt), max_tokens)
-        if r["tokens"] == 0 or not r["text"]:
-            out["zero_token_first_try"] = r["tokens"] == 0
-            out["empty_response_first_try"] = not bool(r["text"])
-            out["retried"] = True
-            r = complete(server, model_name,
-                         build_prompt(obs, decision, stable_prompt, tag=uuid.uuid4().hex[:8]), max_tokens)
-        out.update(text=r["text"] or None, tokens=r["tokens"], finish=r["finish"], ms=r["ms"],
-                   ok=r["tokens"] > 0 and bool(r["text"]))
-        if not out["ok"]:
-            out["error"] = "zero-token or empty-answer reply after retry"
-    except (urllib.error.URLError, OSError, KeyError, ValueError, TypeError, IndexError) as e:
-        out["error"] = f"{type(e).__name__}: {e}"[:200]
-    return out
-
-
-def server_ready(server):
-    try:
-        with urllib.request.urlopen(server.rstrip("/") + "/v1/models", timeout=3) as r:
-            return r.status == 200
-    except OSError:
-        return False
+def explain(lfm, obs, decision, max_tokens, stable_prompt):
+    """One capped sentence. The client tags the prompt, rejects zero-token or empty replies, retries once,
+    and returns errors as data. LFM3-1.7B reasons by default, so sentence() closes the reasoning block."""
+    r = lfm.sentence(build_prompt(obs, decision), system=SYSTEM_LINE, max_tokens=max_tokens,
+                     unique=not stable_prompt)
+    return {k: r[k] for k in ("ok", "text", "tokens", "finish", "ms", "retried", "error")}
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--model-dir", default="~/models/d1-2B")
+    ap.add_argument("--gate", choices=["d1", "rule"], default="d1",
+                    help="d1: d1-2B through Transformers (needs the d1 venv and snapshot). "
+                         "rule: temperature limits in code (no d1, torch, or venv)")
+    ap.add_argument("--model-dir", default="~/models/d1-2B", help="d1 snapshot (--gate d1)")
+    ap.add_argument("--threshold", type=float, default=0.5,
+                    help="--gate d1: p_alert that triggers log_alert (example value; tune on labeled states)")
+    ap.add_argument("--rule-temp-c", type=float, default=70.0,
+                    help="--gate rule: alert at or above this temperature (example value; set from your readings)")
+    ap.add_argument("--rule-rise-c", type=float, default=8.0,
+                    help="--gate rule: alert when the one-minute rise reaches this (example value)")
     ap.add_argument("--server", default="http://127.0.0.1:18181")
     ap.add_argument("--llm", default="LiquidAI/LFM3-1.7B-GGUF:Q4_0")
     ap.add_argument("--iterations", type=int, default=0, help="0 = run until Ctrl-C")
     ap.add_argument("--interval", type=float, default=5.0, help="seconds to wait between iterations")
-    ap.add_argument("--threshold", type=float, default=0.5,
-                    help="p_alert that triggers log_alert (example value; tune on labeled states)")
     ap.add_argument("--max-explain-tokens", type=int, default=80)
     ap.add_argument("--sensor-mode", choices=["board", "simulated", "fixed"], default="board",
                     help="board: the board's thermal zones (default). simulated: random states. "
@@ -250,16 +251,24 @@ def main():
         except RuntimeError as e:
             sys.exit(f"{e}. Use --sensor-mode simulated on a machine without thermal zones.")
 
-    model_dir = os.path.expanduser(args.model_dir)
-    if not os.path.isdir(model_dir):
-        sys.exit(f"d1 snapshot not found at {model_dir}. See examples/system-one-decision/README.md")
-    if not server_ready(args.server):
-        sys.exit(f"no GenieX server at {args.server}. Start it with: geniex serve --compute npu")
+    lfm = LFM(args.server, args.llm, timeout=EXPLAIN_TIMEOUT_S)
+    if not lfm.ready():
+        sys.exit(f"no GenieX server at {args.server}. In a separate terminal, from the repo root: "
+                 "bash skills/iq9-geniex-lfm/scripts/serve.sh run")
 
-    model = AutoModel.from_pretrained(model_dir, trust_remote_code=True, local_files_only=True,
-                                      dtype=torch.float32)
-    model = model.to("cpu").eval()
-    print(f"gate loaded: d1-2B fp32 on CPU, threads={torch.get_num_threads()}", flush=True)
+    if args.gate == "d1":
+        d1_decide, gate_info = load_d1(os.path.expanduser(args.model_dir))
+
+        def gate(obs):
+            return d1_decide(obs, args.threshold)
+    else:
+        gate_info = (f"rule (soc_temp_c >= {args.rule_temp_c} C, or a one-minute rise >= {args.rule_rise_c} C); "
+                     "no d1")
+
+        def gate(obs):
+            return rule_decide(obs, args.rule_temp_c, args.rule_rise_c)
+
+    print(f"gate:        {gate_info}", flush=True)
     print(f"generator:   {args.llm} via {args.server}", flush=True)
     print(f"sensors:     {args.sensor_mode}" + (f" ({len(telemetry.zones)} thermal zones)" if telemetry else ""),
           flush=True)
@@ -274,51 +283,58 @@ def main():
     signal.signal(signal.SIGTERM, _stop)
 
     rng = random.Random(args.seed)
-    counts = {"iterations": 0, "alerts": 0, "explanations_ok": 0, "zero_token_retries": 0,
-              "explain_errors": 0, "sensor_errors": 0}
+    counts = {"iterations": 0, "alerts": 0, "explanations_ok": 0, "explain_retries": 0,
+              "explain_errors": 0, "sensor_errors": 0, "decision_errors": 0}
     i = 0
     with open(args.log, "a") as log:
-        while not stop["flag"] and (args.iterations == 0 or i < args.iterations):
+
+        def write(rec):
+            log.write(json.dumps(rec) + "\n")
+            log.flush()
+
+        def more():
+            return not stop["flag"] and (args.iterations == 0 or i < args.iterations)
+
+        while more():
             t_loop = time.perf_counter()
+            rec = {"t": now_iso(), "iteration": i}
+            # A monitor logs a failed read or decision as data and keeps running.
             try:
-                obs = read_sensors(args.sensor_mode, rng, telemetry)
-            except RuntimeError as e:
-                # Degrade gracefully: log the failed read and keep the loop running.
-                rec = {"t": now_iso(), "iteration": i, "error": f"sensor read failed: {e}"}
-                log.write(json.dumps(rec) + "\n")
-                log.flush()
-                counts["sensor_errors"] += 1
-                print(f"[{i}] sensor read failed: {e}", flush=True)
+                stage = "sensor"
+                rec["obs"] = obs = read_sensors(args.sensor_mode, rng, telemetry)
+                stage = "decision"
+                rec["decision"] = decision = gate(obs)
+            except Exception as e:  # noqa: BLE001
+                rec["error"] = f"{stage} failed: {type(e).__name__}: {e}"[:300]
+                write(rec)
+                counts[f"{stage}_errors"] += 1
+                print(f"[{i}] {rec['error']}", flush=True)
                 i += 1
-                time.sleep(args.interval)
+                if more():
+                    time.sleep(args.interval)
                 continue
 
-            decision = decide(model, obs)
-            decision["alert"] = decision["p_alert"] >= args.threshold
-            action = choose_action(decision, args.threshold)
-            rec = {"t": now_iso(), "iteration": i, "obs": obs, "decision": decision}
+            action = choose_action(decision)
             rec["action"] = run_action(action, decision)
             rec["explanation"] = None
             if action == "log_alert":
-                rec["explanation"] = explain(args.server, args.llm, obs, decision,
-                                             args.max_explain_tokens, args.stable_prompt)
+                rec["explanation"] = explain(lfm, obs, decision, args.max_explain_tokens, args.stable_prompt)
             rec["loop_ms"] = round((time.perf_counter() - t_loop) * 1000, 1)
-            log.write(json.dumps(rec) + "\n")
-            log.flush()
+            write(rec)
 
             counts["iterations"] += 1
             counts["alerts"] += decision["alert"]
             ex = rec["explanation"]
             if ex:
                 counts["explanations_ok"] += ex["ok"]
-                counts["zero_token_retries"] += ex["zero_token_first_try"]
+                counts["explain_retries"] += ex["retried"]
                 counts["explain_errors"] += ex["error"] is not None
-            print(f"[{i}] p_alert={decision['p_alert']:.3f} action={action} "
+            print(f"[{i}] {describe(decision)} action={action} "
                   f"gate={decision['gate_ms'] / 1000:.1f}s loop={rec['loop_ms'] / 1000:.1f}s"
                   + (f" explain_tokens={ex['tokens']}{' (retried)' if ex['retried'] else ''}" if ex else ""),
                   flush=True)
             i += 1
-            if not stop["flag"] and (args.iterations == 0 or i < args.iterations):
+            if more():
                 time.sleep(args.interval)
 
     print("summary: " + json.dumps(counts), flush=True)

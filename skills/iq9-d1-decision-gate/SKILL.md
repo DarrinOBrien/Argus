@@ -10,7 +10,7 @@ metadata:
 
 This skill implements the **reference CPU Transformers route**. The [optional ZETIC NPU Decision API](../../examples/zetic-lfm/README.md#optional-zetic-d1-route) uses separate native packages and is not integrated into these Python helpers. Its probabilities need task calibration for that package/runtime; preserve the reference snapshot pin.
 
-d1-2B takes a state (text, JSON, images) and named questions. It returns calibrated, typed answers from one forward pass, with **zero output tokens**. It is not a chat model, and its zero output tokens are **expected**, not an LFM-generation failure. d1 is optional: use a deterministic rule or another decision design when appropriate. Latest dated evidence: [README Developer Notes](../../README.md#developer-notes); detailed API/setup: `docs/decision-models.md` and `examples/system-one-decision/`.
+d1-2B takes a state (text, JSON, images) and named questions. It returns calibrated, typed answers from one forward pass, with **zero output tokens**. It is not a chat model, and its zero output tokens are **expected**, not an LFM-generation failure. d1 is optional: use a deterministic rule or another decision design when appropriate. Reference-stack rules: [README Developer Notes](../../README.md#rules-for-the-reference-stack); API and setup: `docs/decision-models.md` and `examples/system-one-decision/`.
 
 ## Hard rules
 
@@ -23,7 +23,7 @@ d1-2B takes a state (text, JSON, images) and named questions. It returns calibra
 
 ## Stage only if the app uses d1
 
-Inspect `~/models/d1-2B` first. If the pinned snapshot is missing, **ask whether the participant has the supplied USB model drive and USB-C dongle/adapter** before proposing `fetch_d1.py`. With approval, **copy the full pinned Transformers snapshot—not a GGUF, and never move/delete the USB source—to `~/models/d1-2B`**. Follow [USB model staging](../../docs/developer-guide.md#usb-model-drive-copy-never-move): inspect paths/symlinks, preserve existing board files, copy all weights/config/tokenizer/model-code assets and `REVISION`, and verify sizes/checksums. Resolve any bundled cache symlinks into local files rather than leaving links to removable media. Confirm the full pin `10e7671d44e4b37700020b1eed3f594c5f2af0b4` and review the copied model code before enabling trust. A drive containing another revision does not authorize changing the pin. Run long copy jobs in a separate terminal; download only if compatible local/USB assets are unavailable and separately approved.
+Inspect `~/models/d1-2B` first. If the pinned snapshot is missing, use the supplied USB model drive before proposing `fetch_d1.py`, following [USB model staging](../../docs/developer-guide.md#usb-model-drive-copy-never-move): copy the **full pinned Transformers snapshot** (not a GGUF) as real files rather than symlinks to the drive, and never move or delete the source. Confirm the full pin `10e7671d44e4b37700020b1eed3f594c5f2af0b4` and review the copied model code before enabling trust. A drive holding another revision does not authorize changing the pin.
 
 ## Budget
 
@@ -63,7 +63,7 @@ State design matters more than wording:
 
 A gate can fail to track raw board readings such as temperature. Do not copy a threshold from another model or task. Calibrate:
 
-1. Log states while the app runs, with their `p_alert` (the always-on agent's log has `decision.p_alert`).
+1. Log states while the app runs, with their `p_alert` (the always-on agent's log has `decision.p_alert` with `--gate d1`).
 2. Label task-representative states by hand (`"label": true/false`). Aim for at least 30 calibration states and 10 per class as an initial sample, not proof of deployment readiness. Reserve separate held-out states (prefer separate time periods/events); do not fit and evaluate on the same rows.
 3. Run:
 

@@ -8,7 +8,7 @@ An **optional alternative to GenieX** on the Dragonwing IQ-9075. The wrapper acc
 - **SDK:** [Ixian Hexagon SDK](https://github.com/zetic-ai/IxianHexagon), release **0.2.1**. The collection's model cards require 0.2.1 or later; this recipe pins 0.2.1.
 - **Fixtures:** [`zetic-ai/LFM3-zetic-apps`](https://github.com/zetic-ai/LFM3-zetic-apps). Its older IQ9 guide uses the previous SDK and gated monolithic model repository; use the staging instructions here for the current collection.
 
-**Verification boundary:** the current SDK/package instructions were checked against upstream release metadata, headers, CLI flag/log strings, and package manifests on 2026-11-11. Local wrapper tests use mocks. **SDK 0.2.1 and the new package revisions have not been run on our board.** The connected-board checks and timings below are historical results for SDK 0.1.0 and the older packages, not evidence for this update.
+**Verification boundary:** the current SDK/package instructions were checked against upstream release metadata, headers, CLI flag/log strings, and package manifests on 2026-11-11. Local wrapper tests use mocks. **SDK 0.2.1 and the current package revisions have since been run on the IQ-9075.** The timings below were measured with SDK 0.1.0 and the older packages and have not been re-measured, so treat them as historical.
 
 [`run.py`](run.py) is a standard-library Python wrapper around the **prebuilt vendor CLI**. No compiler, Python ML environment, camera, or microphone is needed. It makes one capped request, checks usage, answer content, natural completion, and current-request Hexagon evidence, then prints a JSONL result. It never downloads assets, starts a server, executes model-proposed actions, or changes GenieX.
 
@@ -174,7 +174,7 @@ Each invocation prints one JSON object containing `ok`, `text`, completion usage
 
 **Historical evidence, before the Ixian 0.2.1 update.** On **2026-11-10**, IQ-9075, Ubuntu 24.04 aarch64, SDK **0.1.0/runtime `61ba260`**, v73 packages with **`w4lpbq` language-model weights**:
 
-- The earlier wrapper was checked on this board with four bounded requests: text on LFM3-1.7B and Omni, then Omni image and audio. All returned positive usage, natural completion, and current-request Hexagon evidence. The expanded wrapper and new package revisions need a new bounded board check.
+- The earlier wrapper was checked on this board with four bounded requests: text on LFM3-1.7B and Omni, then Omni image and audio. All returned positive usage, natural completion, and current-request Hexagon evidence. SDK 0.2.1 and the current package revisions have since been run on the board; these timings were not re-measured.
 - Omni: one text, one synthetic-image, and one 11-second WAV request returned useful answers (Paris, three circles, recognizable JFK transcription), within caps of 64/64/128 tokens. This is a smoke check, not a quality evaluation.
 - Text-model comparison: the longer prompt shown above (sky blue, Rayleigh scattering, red sunsets, about 150 words), temperature zero, 512-token cap, one excluded warm-up per runtime. Medians of **three successful answers**:
 
@@ -191,7 +191,7 @@ Pinned sources: apps repo `35acef15824f4df435c36faf6439b2204a89c029`; HF package
 
 ## Offline status
 
-The wrapper launches only local files and has no downloads, installs, cloud calls, or UI dependencies. The older SDK 0.1.0/model startup and the above IQ9 requests were tested **while connected**. **The current 0.2.1 route has not been board-tested, and a network-off cold-start rehearsal has not been performed.** Follow [offline readiness](../../docs/offline-readiness.md) with explicit approval and a tested UART/isolated USB-C control path before claiming an offline demo. Offline environment variables or local paths alone are not that proof.
+The wrapper launches only local files and has no downloads, installs, cloud calls, or UI dependencies. The older SDK 0.1.0/model startup and the above IQ9 requests were tested **while connected**. The current 0.2.1 route has since been run on the board. **A network-off cold-start rehearsal is not recorded here.** Follow [offline readiness](../../docs/offline-readiness.md) with explicit approval and a tested UART/isolated USB-C control path before claiming an offline demo. Offline environment variables or local paths alone are not that proof.
 
 ## Local checks
 
