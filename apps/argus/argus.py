@@ -40,7 +40,7 @@ NUM_WORDS = {w: i for i, w in enumerate(
     "sixteen seventeen eighteen nineteen twenty".split())}
 NUM_WORDS.update({"thirty": 30, "forty": 40, "fifty": 50, "hundred": 100})
 UNITS = {"milligram": "mg", "milligrams": "mg", "mg": "mg", "microgram": "mcg", "micrograms": "mcg", "mcg": "mcg",
-         "milliliter": "ml", "milliliters": "ml", "ml": "ml", "unit": "units", "units": "units",
+         "milliliter": "ml", "milliliters": "ml", "millilitre": "ml", "millilitres": "ml", "cc": "ml", "mls": "ml", "ml": "ml", "unit": "units", "units": "units",
          "gram": "g", "grams": "g", "g": "g"}
 NUM = r"(\d+(?:\.\d+)?|" + "|".join(NUM_WORDS) + r")"
 UNIT = r"(" + "|".join(sorted(UNITS, key=len, reverse=True)) + r")"
@@ -237,6 +237,8 @@ class Argus:
         self.log("system", message="Argus started", mock=args.mock, runner="resident" if self.resident else "cli", model=str(args.model), protocol=self.protocol["name"])
         threading.Thread(target=self._worker, daemon=True).start()
         threading.Thread(target=self._ticker, daemon=True).start()
+        if args.lock_procedure is not None:
+            threading.Thread(target=self._autostart, daemon=True).start()
         if args.scan_every > 0:
             threading.Thread(target=self._watch, daemon=True).start()
         threading.Thread(target=self._ear, daemon=True).start()
@@ -329,6 +331,10 @@ class Argus:
         return max(named, key=lambda p: len(p["name"]), default=None)
 
     def choose_procedure(self, query):
+        if self.args.lock_procedure is not None and str(query).strip().lstrip("#") not in (
+                str(self.args.lock_procedure), "zero" if self.args.lock_procedure == 0 else ""):
+            self.log("note", text=f"procedure choice '{query}' ignored: locked to procedure #{self.args.lock_procedure}")
+            return
         """From the page: a number, or all or part of a title."""
         low = query.lower().strip().lstrip("#")
         if low.isdigit() or low in NUM_WORDS:
@@ -677,11 +683,12 @@ class Argus:
 
     def _drug_name(self, word):
         known = list(self.protocol["drugs"]) + list(self.proc_drugs)
-        match = difflib.get_close_matches(word.lower(), known, n=1, cutoff=0.7)
+        word = {"epinephrine": "adrenaline", "epinephrin": "adrenaline"}.get(word.lower(), word.lower())
+        match = difflib.get_close_matches(word, known, n=1, cutoff=0.7)
         return match[0] if match else None
 
     def parse_rules(self, text):
-        procedure = self.find_procedure(text)
+        procedure = self.find_procedure(text) if self.args.lock_procedure is None else None
         if procedure:
             return [{"type": "procedure", "id": procedure["id"]}]
         low, events = text.lower(), []
@@ -793,6 +800,16 @@ class Argus:
             self.alert("medium", f"Step out of order: '{step['name']}' called after '{previous}'.")
         if skipped:
             self.alert("high", "Step skipped: " + ", ".join(skipped) + ".")
+
+    def _autostart(self):
+        """Locked demo: once the camera has a frame, start the chosen procedure (which runs the count in)."""
+        for _ in range(120):
+            try:
+                self.camera.luma()
+                break
+            except OSError:
+                time.sleep(0.5)
+        self.jobs.put(("procedure", str(self.args.lock_procedure)))
 
     def _watch(self):
         """Always-on eye: after count in, rescan whenever the worker is idle."""
@@ -968,6 +985,8 @@ def main():
     library = next((d / "procedures_step_by_step.txt" for d in (HERE, HERE.parent.parent)
                     if (d / "procedures_step_by_step.txt").exists()), HERE / "procedures_step_by_step.txt")
     p.add_argument("--procedures", default=str(library), help="step-by-step procedure library (text file)")
+    p.add_argument("--lock-procedure", type=int, default=0, metavar="N",
+                   help="start procedure #N from the library at launch and ignore other choices (default 0, the demo); -1 = free choice")
     p.add_argument("--run-dir", default=str(HERE / "run"), help="log, clips and zone snapshots")
     p.add_argument("--camera", default="auto", help="V4L2 device, or auto for the first USB camera")
     p.add_argument("--mic", default="plughw:CARD=WEBCAM,DEV=0", help="ALSA capture device")
@@ -987,6 +1006,8 @@ def main():
     p.add_argument("--mock", action="store_true", help="laptop-only: fake camera and model, to test logic and UI")
     p.add_argument("--polar", metavar="ID", help="Polar strap device ID (e.g. 1C5EEF3E) for live heart rate; needs bleak")
     args = p.parse_args()
+    if args.lock_procedure < 0:
+        args.lock_procedure = None
     args.sdk, args.model = os.path.expanduser(args.sdk), os.path.expanduser(args.model)
     app = Argus(args)
     server = ThreadingHTTPServer((args.host, args.port), make_handler(app))
