@@ -109,7 +109,7 @@ Argus makes no outbound network call: local model files, a local SDK binary, a p
 
 ## Team
 
-Darrin O'Brien, Furkan Imamoglu, Hussein
+Darrin O'Brien, Furkan Imamoglu, Hussein Hirani
 
 ## License
 
