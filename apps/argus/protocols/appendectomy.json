@@ -15,6 +15,7 @@
     {"id": "removal", "name": "Remove appendix", "keywords": ["removing the appendix", "appendix out", "specimen"], "max_minutes": 10},
     {"id": "closing", "name": "Count out and closing", "keywords": ["closing", "count out", "closure"], "max_minutes": 15}
   ],
+  "vitals": {"hr_min": 50, "hr_max": 120},
   "drugs": {
     "propofol": {"max_single_dose": 200, "unit": "mg"},
     "fentanyl": {"max_single_dose": 100, "unit": "mcg"},
