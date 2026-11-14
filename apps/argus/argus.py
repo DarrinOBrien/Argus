@@ -4,7 +4,8 @@
 observe (camera zones, microphone) -> model proposes (LFM3-Omni on the Hexagon NPU via ZETIC)
 -> code decides (inventory, protocol, dose and timing rules) -> alert (screen, optional speech) -> JSONL log.
 
-Standard library only. No network calls: local model files, local web page, loopback by default.
+Standard library only, except the optional --polar heart-rate strap, which needs the bleak package.
+No network calls: local model files, local web page, loopback by default.
 """
 import argparse
 import array
@@ -33,6 +34,7 @@ import camera as cam
 import zetic_run
 
 HERE = Path(__file__).resolve().parent
+HR_MEASUREMENT = "00002a37-0000-1000-8000-00805f9b34fb"  # standard Bluetooth LE heart-rate characteristic
 NUM_WORDS = {w: i for i, w in enumerate(
     "zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen "
     "sixteen seventeen eighteen nineteen twenty".split())}
@@ -145,6 +147,14 @@ class Resident:
         return self.sessions[mode].ask(prompt)
 
 
+def heart_rate(data):
+    """bpm from one heart-rate notification, or None when the strap reports no skin contact or no reading."""
+    if len(data) < 2 or data[0] & 0x06 == 0x04:
+        return None
+    bpm = int.from_bytes(data[1:3], "little") if data[0] & 1 else data[1]
+    return bpm if 0 < bpm < 300 else None
+
+
 class Argus:
     def __init__(self, args):
         self.args = args
@@ -170,6 +180,8 @@ class Argus:
         self.current = -1
         self.drugs = []
         self.listening = False
+        self.hr = None
+        self.hr_logged = 0.0
         self.camera = cam.Camera(args.camera, mock=args.mock)
         self.resident = None
         if not args.mock and args.runner != "cli":
@@ -186,6 +198,57 @@ class Argus:
         if args.scan_every > 0:
             threading.Thread(target=self._watch, daemon=True).start()
         threading.Thread(target=self._ear, daemon=True).start()
+        if args.polar:
+            threading.Thread(target=self._pulse, daemon=True).start()
+
+    # ---------- heart rate (Polar strap, Bluetooth LE) ----------
+    def _pulse(self):
+        import asyncio
+        while True:
+            try:
+                asyncio.run(self._pulse_session())
+            except Exception as exc:  # loop errors are data, not crashes
+                self.log("error", where="pulse", error=f"{type(exc).__name__}: {exc}")
+            with self.lock:
+                had, self.hr = self.hr, None
+            if had:
+                self.alert("high", "Heart rate signal lost. Check the strap.")
+            time.sleep(3)
+
+    async def _pulse_session(self):
+        import asyncio
+        from bleak import BleakClient, BleakScanner
+        dev = await BleakScanner.find_device_by_filter(lambda d, adv: self.args.polar in (d.name or ""), timeout=15)
+        if dev is None:
+            raise RuntimeError(f"strap {self.args.polar} not found (worn, electrodes wet, not held by a phone?)")
+        packets = asyncio.Queue()
+        async with BleakClient(dev) as client:
+            self.log("system", message=f"heart-rate strap connected: {dev.name}")
+            await client.start_notify(HR_MEASUREMENT, lambda _, data: packets.put_nowait(bytes(data)))
+            last = time.monotonic()
+            while time.monotonic() - last < 5:
+                try:
+                    data = await asyncio.wait_for(packets.get(), 1)
+                except asyncio.TimeoutError:
+                    continue
+                bpm = heart_rate(data)
+                if bpm is not None:
+                    last = time.monotonic()
+                    self.on_heart_rate(bpm)
+        raise RuntimeError("no heart-rate reading for 5 s")
+
+    def on_heart_rate(self, bpm):
+        limits = self.protocol.get("vitals", {})
+        low, high = limits.get("hr_min", 40), limits.get("hr_max", 140)
+        out = not low <= bpm <= high
+        with self.lock:
+            was_out = bool(self.hr and self.hr["out"])
+            self.hr = {"bpm": bpm, "time": clock(), "out": out, "min": low, "max": high}
+        if out and not was_out:
+            self.alert("high", f"Heart rate {bpm} bpm, outside {low}-{high}.")
+        if out != was_out or time.monotonic() - self.hr_logged >= 30:
+            self.hr_logged = time.monotonic()
+            self.log("vital", hr_bpm=bpm, out_of_range=out)
 
     # ---------- log ----------
     def log(self, kind, **fields):
@@ -567,7 +630,7 @@ class Argus:
                     "baseline": self.baseline, "baseline_time": self.baseline_time, "last_seen": self.last_seen,
                     "steps": [{k: s[k] for k in ("id", "name", "status", "started", "done", "max_minutes", "overdue")}
                               for s in self.steps],
-                    "drugs": self.drugs, "alerts": self.alerts[-8:],
+                    "drugs": self.drugs, "polar": self.args.polar, "hr": self.hr, "alerts": self.alerts[-8:],
                     "events": [{k: v for k, v in e.items() if k != "device"} for e in self.events
                                if e["kind"] not in ("model", "observation")][-30:],
                     "last_metric": self.metrics[-1] if self.metrics else None, "medians": medians,
@@ -647,6 +710,7 @@ def main():
     p.add_argument("--host", default="127.0.0.1", help="keep loopback; reach it through SSH port forwarding")
     p.add_argument("--port", type=int, default=8000)
     p.add_argument("--mock", action="store_true", help="laptop-only: fake camera and model, to test logic and UI")
+    p.add_argument("--polar", metavar="ID", help="Polar strap device ID (e.g. 1C5EEF3E) for live heart rate; needs bleak")
     args = p.parse_args()
     args.sdk, args.model = os.path.expanduser(args.sdk), os.path.expanduser(args.model)
     app = Argus(args)
