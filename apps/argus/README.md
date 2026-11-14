@@ -95,7 +95,7 @@ The model never writes to the inventory, never clears an alert, and never decide
 | `camera.py` | Standard-library V4L2 capture (no OpenCV, numpy, or PIL). Grabs YUYV 1280x720, keeps the luma plane, and produces the grayscale preview and the 512x512 zone crops |
 | `zetic_run.py` | Wrapper around the vendor CLI `zetic_lfm3_cli`. One capped request per call, local files only, with output and device-evidence guards; errors are returned as data |
 | `protocols/appendectomy.json` | Demo protocol: four item types with a shape hint for each, six steps with keywords and time limits, and a drug table with units and single-dose maximums |
-| `static/index.html` | The board-hosted page |
+| `static/index.html` | The board-hosted dashboard, one self-contained file (no external scripts, fonts, or images). Top row: case status, KPI tiles, and gauges for count match, step time, and heart rate (with `--polar`) or last model request time. Middle row: model request time per request, and items seen per zone against the count in. Bottom row: camera with controls, procedure steps, inventory, event log, drug log, and performance. Respects reduced-motion, reduced-transparency, and high-contrast settings |
 
 Local endpoints served by `argus.py`: `GET /` (page), `GET /frame.bmp` (camera preview), `GET /api/state` (counts, steps, drugs, alerts, recent log, latency medians), and `POST /api/count_in`, `/api/scan`, `/api/closing`, `/api/say` (typed statement), `/api/listen` (microphone on or off).
 
