@@ -2,6 +2,10 @@
 
 **An always-on eye and ear for the operating room. Everything runs on the board. No patient data leaves the room.**
 
+**First place** at the **On-Device AI Hackathon: Cleared for Takeoff** (Liquid AI x Qualcomm, Friday, November 13, 2026, 555 Mission St, San Francisco). Each member of the team won a Dragonwing IQ-9075 board.
+
+**Team:** [Darrin O'Brien](https://github.com/DarrinOBrien), [Furkan Imamoglu](https://github.com/Mr-1011), [Hussein Hirani](https://github.com/husseinhirani)
+
 Argus watches the instrument tray and the patient area, listens to the surgical team, and speaks up when something is wrong: an item missing at closing, a dose over the limit, a skipped step, a heart rate out of range. It runs entirely on a Qualcomm Dragonwing IQ-9075 with Liquid AI's LFM3-Omni-2B on the Hexagon NPU, built to keep working with Wi-Fi switched off.
 
 Built in two hours at the **On-Device AI Hackathon: Cleared for Takeoff** (Liquid AI x Qualcomm), San Francisco, November 13, 2026.
@@ -106,10 +110,6 @@ python3 apps/argus/argus.py --mock
 ## Offline and verification status
 
 Argus makes no outbound network call: local model files, a local SDK binary, a page served by the board on loopback, no telemetry, no CDN assets. A static offline audit of `apps/argus` reports 0 errors and 0 warnings. What has and has not been measured on the board is listed honestly in the [app README](apps/argus/README.md#what-is-not-verified-yet).
-
-## Team
-
-Darrin O'Brien, Furkan Imamoglu, Hussein Hirani
 
 ## License
 
