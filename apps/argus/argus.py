@@ -14,11 +14,16 @@ import difflib
 import json
 import os
 from pathlib import Path
+import pty
 import queue
 import re
 import resource
+import select
+import shutil
+import signal
 import statistics
 import subprocess
+import termios
 import threading
 import time
 import wave
@@ -49,6 +54,97 @@ def clock(ts=None):
     return (ts or now()).strftime("%H:%M:%S")
 
 
+class CliSession:
+    """One vendor CLI process in interactive mode: the model stays loaded on the NPU between requests.
+
+    `chat -i --media FILE` re-reads FILE for the first turn after every /reset, so each request is:
+    overwrite FILE, send /reset, send the prompt, read the answer and the runtime's stats line.
+    """
+    STATS = re.compile(r"\[(\w+)\] finish (\w+) \| prompt (\d+) rows \(cached (\d+)\) -> (\d+) tokens"
+                       r"(?:.*?ttft ([\d.]+) ms)?(?:.*?decode \d+ steps ([\d.]+) t/s)?")
+    ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
+
+    def __init__(self, sdk, model, media=None, system=None, max_tokens=96):
+        lib = str(Path(sdk) / "lib")
+        cmd = [str(Path(sdk) / "bin/zetic_lfm3_cli"), "chat", "-i", "--model", str(model), "--target", "v73",
+               "--lib-dir", lib, "--temp", "0", "--max-tokens", str(max_tokens)]
+        if media:
+            cmd += ["--media", str(media)]
+        if system:
+            cmd += ["--system", system]
+        self.master, slave = pty.openpty()
+        attrs = termios.tcgetattr(slave)
+        attrs[3] &= ~termios.ECHO
+        termios.tcsetattr(slave, termios.TCSANOW, attrs)
+        self.proc = subprocess.Popen(cmd, stdin=slave, stdout=slave, stderr=slave, cwd=sdk, close_fds=True,
+                                     env=dict(os.environ, LD_LIBRARY_PATH=lib))
+        os.close(slave)
+        banner = self._read(lambda b: re.search(r"\| load \d+ ms", b) and b.rstrip().endswith(">"), 90)
+        load = re.search(r"\| load (\d+) ms", banner)
+        if not load or "loaded " not in banner:
+            raise OSError("model session did not start: " + banner[-300:])
+        self.load_ms = int(load.group(1))
+        self.device = next((l.strip() for l in banner.splitlines() if "hexrt open" in l and "v73" in l and "nsp2=1" in l), None)
+
+    def _read(self, done, timeout):
+        buf, end = "", time.time() + timeout
+        while time.time() < end:
+            if select.select([self.master], [], [], 0.05)[0]:
+                try:
+                    buf += os.read(self.master, 65536).decode(errors="replace")
+                except OSError:
+                    break
+                if done(self.ANSI.sub("", buf)):
+                    break
+        return self.ANSI.sub("", buf).replace("\r", "")
+
+    def ask(self, prompt, timeout=60):
+        os.write(self.master, b"/reset\n" + " ".join(prompt.split()).encode() + b"\n")
+        out = self._read(lambda b: self.STATS.search(b) and b.rstrip().endswith(">"), timeout)
+        stats = self.STATS.search(out)
+        if not stats:
+            raise OSError("no completion stats from the model session: " + out[-200:])
+        status, finish, _, _, tokens, ttft, tps = stats.groups()
+        text = re.sub(r"^(\s*>\s*)+", "", out[:stats.start()]).strip()
+        return (status.lower() == "ok", int(tokens), float(ttft) if ttft else None, float(tps) if tps else None,
+                finish, text)
+
+
+class Resident:
+    """Three always-loaded sessions of the same ZETIC package: vision, speech-to-text, text."""
+    tts = False  # speech output still uses a one-shot CLI call
+
+    def __init__(self, sdk, model, run_dir):
+        self.image_path, self.audio_path = run_dir / "live.ppm", run_dir / "live.wav"
+        if not self.image_path.exists():
+            self.image_path.write_bytes(b"P6\n512 512\n255\n" + bytes(512 * 512 * 3))
+        if not self.audio_path.exists():
+            with wave.open(str(self.audio_path), "wb") as w:
+                w.setnchannels(1), w.setsampwidth(2), w.setframerate(16000), w.writeframes(bytes(32000))
+        self.sessions = {"image": CliSession(sdk, model, media=self.image_path, max_tokens=64),
+                         "audio": CliSession(sdk, model, media=self.audio_path, system="Perform ASR in English.", max_tokens=96),
+                         "text": CliSession(sdk, model, max_tokens=64)}
+        self.load_ms = sum(x.load_ms for x in self.sessions.values())
+        self.device = self.sessions["image"].device
+        self.info = ["LFM3-Omni-2B", "v73 two-NSP", "3 resident sessions"]
+
+    def close(self):
+        """Exit each session cleanly. Killing them leaves their NPU memory mappings stuck until a reboot."""
+        for session in self.sessions.values():
+            try:
+                os.write(session.master, b"/exit\n")
+                session.proc.wait(timeout=15)
+            except (OSError, subprocess.SubprocessError):
+                pass
+
+    def request(self, mode, prompt, path="-", system="-", max_tokens=96):
+        if mode == "image" and Path(path) != self.image_path:
+            shutil.copyfile(path, self.image_path)
+        if mode == "audio" and Path(path) != self.audio_path:
+            shutil.copyfile(path, self.audio_path)
+        return self.sessions[mode].ask(prompt)
+
+
 class Argus:
     def __init__(self, args):
         self.args = args
@@ -75,9 +171,20 @@ class Argus:
         self.drugs = []
         self.listening = False
         self.camera = cam.Camera(args.camera, mock=args.mock)
-        self.log("system", message="Argus started", mock=args.mock, model=str(args.model), protocol=self.protocol["name"])
+        self.resident = None
+        if not args.mock and args.runner != "cli":
+            try:
+                self.resident = Resident(args.sdk, args.model, self.run_dir)
+            except OSError as exc:
+                print(f"resident model sessions unavailable ({exc}); using one CLI process per request", flush=True)
+        if self.resident:
+            self.log("system", message="model loaded once and kept resident", load_ms=self.resident.load_ms,
+                     info=self.resident.info, device=self.resident.device)
+        self.log("system", message="Argus started", mock=args.mock, runner="resident" if self.resident else "cli", model=str(args.model), protocol=self.protocol["name"])
         threading.Thread(target=self._worker, daemon=True).start()
         threading.Thread(target=self._ticker, daemon=True).start()
+        if args.scan_every > 0:
+            threading.Thread(target=self._watch, daemon=True).start()
         threading.Thread(target=self._ear, daemon=True).start()
 
     # ---------- log ----------
@@ -103,6 +210,8 @@ class Argus:
             started = time.perf_counter()
             if self.args.mock:
                 result = self._mock(kind, prompt)
+            elif self.resident:
+                result = self._resident(prompt, image, audio, max_tokens)
             else:
                 result = zetic_run.run(self.args.sdk, self.args.model, prompt, image=image, audio=audio,
                                        max_tokens=max_tokens, timeout=self.args.timeout)
@@ -117,6 +226,32 @@ class Argus:
         self.log("model", request=kind, text=result.get("text", "")[:400], errors=result.get("errors", []),
                  device=result.get("device_evidence"), **{k: v for k, v in metric.items() if k != "kind"})
         return result
+
+    def _resident(self, prompt, image, audio, max_tokens):
+        """Same guards as the CLI wrapper: positive usage, natural stop, non-empty answer, NPU evidence."""
+        errors = []
+        try:
+            mode = "image" if image else "audio" if audio else "text"
+            ok, tokens, ttft, tps, finish, text = self.resident.request(
+                mode, prompt, path=image or audio or "-", system="Perform ASR in English." if audio else "-",
+                max_tokens=max_tokens)
+            text = re.sub(r"<think>.*?(?:</think>|$)", "", text, flags=re.S | re.I).strip()
+            if not ok:
+                errors.append(text)
+            if not 0 < tokens <= max_tokens:
+                errors.append("zero completion tokens or token cap exceeded")
+            if finish.lower() != "stop":
+                errors.append(f"generation did not finish naturally: {finish}")
+            if not text:
+                errors.append("empty answer")
+            if not self.resident.device:
+                errors.append("missing Hexagon v73/two-NSP evidence in the session log")
+        except (OSError, ValueError) as exc:
+            ok, tokens, ttft, tps, text = False, None, None, None, ""
+            errors.append(f"{type(exc).__name__}: {exc}")
+        return {"ok": not errors, "text": text, "errors": errors, "completion_tokens": tokens,
+                "device_evidence": self.resident.device,
+                "timings": {"model_load_ms": 0.0, "runtime_ttft_ms": ttft, "runtime_decode_tok_s": tps}}
 
     def _mock(self, kind, prompt):
         """Laptop-only stand-in so the logic and UI can be exercised without the board."""
@@ -152,9 +287,17 @@ class Argus:
             counts[item] = value
         return counts
 
-    def scan(self, reason="scan"):
+    def scan(self, reason="scan", confirm=False):
+        """Count both zones. With confirm, count again and use a third pass as tie-breaker (per-item median)."""
         started = time.perf_counter()
         zones = {zone: self._count_zone(zone) for zone in ("tray", "patient")}
+        if confirm:
+            second = {zone: self._count_zone(zone) for zone in ("tray", "patient")}
+            if second != zones:
+                third = {zone: self._count_zone(zone) for zone in ("tray", "patient")}
+                self.log("observation", reason=reason + "_disagreement", passes=[zones, second, third])
+                zones = {zone: {i: sorted((zones[zone][i], second[zone][i], third[zone][i]))[1] for i in self.items}
+                         for zone in ("tray", "patient")}
         stamp = now()
         with self.lock:
             self.zones, self.zones_time = zones, clock(stamp)
@@ -165,7 +308,7 @@ class Argus:
         return zones
 
     def count_in(self):
-        zones = self.scan("count_in")
+        zones = self.scan("count_in", confirm=True)
         baseline = {i: zones["tray"][i] + zones["patient"][i] for i in self.items}
         with self.lock:
             self.baseline, self.baseline_time = baseline, clock()
@@ -176,7 +319,7 @@ class Argus:
         if self.baseline is None:
             self.alert("high", "Closing called but no count in was recorded.")
             return
-        zones = self.scan("count_out")
+        zones = self.scan("count_out", confirm=True)
         problems = []
         for item in self.items:
             expected, on_tray, in_patient = self.baseline[item], zones["tray"][item], zones["patient"][item]
@@ -330,6 +473,13 @@ class Argus:
         if skipped:
             self.alert("high", "Step skipped: " + ", ".join(skipped) + ".")
 
+    def _watch(self):
+        """Always-on eye: after count in, rescan whenever the worker is idle."""
+        while True:
+            time.sleep(self.args.scan_every)
+            if self.args.scan_every > 0 and self.baseline is not None and self.busy is None and self.jobs.empty():
+                self.jobs.put(("scan", None))
+
     def _ticker(self):
         while True:
             time.sleep(5)
@@ -350,6 +500,17 @@ class Argus:
         wav = self.run_dir / "alert.wav"
         lib = str(Path(self.args.sdk) / "lib")
         try:
+            if self.resident and self.resident.tts:
+                with self.infer_lock:
+                    started = time.perf_counter()
+                    ok, _, first_audio, rtf, _, text = self.resident.request(
+                        "tts", message, path=str(wav), system="Perform TTS in American English using a female voice.")
+                    wall = time.perf_counter() - started
+                if not ok:
+                    raise OSError(text)
+                subprocess.run(["aplay", "-q", "-D", self.args.speaker, str(wav)], check=True, capture_output=True, timeout=60)
+                self.log("action", action="spoken", message=message, tts_s=round(wall, 2), first_audio_ms=first_audio)
+                return
             with self.infer_lock:
                 started = time.perf_counter()
                 subprocess.run([str(Path(self.args.sdk) / "bin/zetic_lfm3_cli"), "chat", "--model", str(self.args.model),
@@ -406,9 +567,13 @@ class Argus:
                     "baseline": self.baseline, "baseline_time": self.baseline_time, "last_seen": self.last_seen,
                     "steps": [{k: s[k] for k in ("id", "name", "status", "started", "done", "max_minutes", "overdue")}
                               for s in self.steps],
-                    "drugs": self.drugs, "alerts": self.alerts[-8:], "events": list(self.events)[-60:],
+                    "drugs": self.drugs, "alerts": self.alerts[-8:],
+                    "events": [{k: v for k, v in e.items() if k != "device"} for e in self.events
+                               if e["kind"] not in ("model", "observation")][-30:],
                     "last_metric": self.metrics[-1] if self.metrics else None, "medians": medians,
                     "peak_rss_mb": max((m["peak_rss_mb"] for m in self.metrics), default=None),
+                    "runner": "resident" if self.resident else "cli",
+                    "model_load_ms": self.resident.load_ms if self.resident else None,
                     "log_path": str(self.log_path)}
 
 
@@ -466,13 +631,16 @@ def main():
     p.add_argument("--model", default="~/zetic-demo/models/lfm3-omni-2b", help="local LFM3-Omni package directory")
     p.add_argument("--protocol", default=str(HERE / "protocols/appendectomy.json"))
     p.add_argument("--run-dir", default=str(HERE / "run"), help="log, clips and zone snapshots")
-    p.add_argument("--camera", default="/dev/video0")
+    p.add_argument("--camera", default="auto", help="V4L2 device, or auto for the first USB camera")
     p.add_argument("--mic", default="plughw:CARD=WEBCAM,DEV=0", help="ALSA capture device")
     p.add_argument("--speaker", default="plughw:CARD=LEMANSEVK,DEV=0", help="ALSA playback device")
     p.add_argument("--clip-seconds", type=int, default=6)
     p.add_argument("--mic-threshold", type=int, default=6000, help="peak level (0-32767) that counts as speech")
     p.add_argument("--parse", choices=("auto", "rules"), default="auto",
                    help="auto: code rules first, the LFM for statements the rules cannot read")
+    p.add_argument("--scan-every", type=float, default=3.0, help="seconds between automatic scans after count in; 0 = off")
+    p.add_argument("--runner", choices=("auto", "cli"), default="auto",
+                   help="auto: keep the model loaded in interactive CLI sessions; cli: one CLI process per request")
     p.add_argument("--speak", action="store_true", help="speak alerts with the model's speech output")
     p.add_argument("--time-scale", type=float, default=1.0, help="scale step time limits (0.02 for a fast demo)")
     p.add_argument("--timeout", type=float, default=120, help="seconds per model request, including load")
@@ -484,10 +652,17 @@ def main():
     app = Argus(args)
     server = ThreadingHTTPServer((args.host, args.port), make_handler(app))
     print(f"Argus on http://{args.host}:{args.port}  log: {app.log_path}", flush=True)
+    def stop(*_):
+        raise KeyboardInterrupt
+    signal.signal(signal.SIGTERM, stop)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         pass
+    finally:
+        if app.resident:
+            with app.infer_lock:
+                app.resident.close()
 
 
 if __name__ == "__main__":

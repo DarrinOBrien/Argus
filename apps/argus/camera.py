@@ -15,8 +15,8 @@ import threading
 import time
 
 W, H = 1280, 720
-# 512x512 crops of the 1280x720 frame: (x0, y0). Left square = tray, right square = patient area.
-ZONES = {"tray": (64, 104), "patient": (704, 104)}
+# Zone = left x offset in the 1024x512 squeezed frame. Left half = tray, right half = patient area.
+ZONES = {"tray": 0, "patient": 512}
 CROP = 512
 
 
@@ -38,11 +38,30 @@ def _bmp_gray(pixels, w, h):
     return header + info + palette + pixels
 
 
+def find_camera():
+    """First USB (uvcvideo) capture node; device numbers change across reboots."""
+    base = "/sys/class/video4linux"
+    try:
+        nodes = sorted(os.listdir(base), key=lambda n: int(n[5:]))
+    except (OSError, ValueError):
+        return "/dev/video0"
+    for node in nodes:
+        try:
+            driver = os.path.basename(os.readlink(f"{base}/{node}/device/driver"))
+            index = open(f"{base}/{node}/index").read().strip()
+        except OSError:
+            continue
+        if driver == "uvcvideo" and index == "0":
+            return "/dev/" + node
+    return "/dev/video0"
+
+
 class Camera:
     """Background capture thread holding the latest luma plane."""
 
     def __init__(self, device="/dev/video0", mock=False):
-        self.device, self.mock = device, mock
+        self.auto, self.mock = device == "auto", mock
+        self.device = find_camera() if self.auto else device
         self.error = None
         self._luma = None
         self._stamp = 0.0
@@ -57,6 +76,8 @@ class Camera:
     def _loop(self):
         while not self._stop:
             try:
+                if self.auto:
+                    self.device = find_camera()  # picks the camera up again after a re-plug
                 self._capture()
             except OSError as exc:  # camera unplugged or busy: report as data and retry
                 self.error = f"camera: {exc}"
@@ -121,10 +142,19 @@ class Camera:
         return _bmp_gray(b"".join(rows), W // step, H // step)
 
     def zone_ppm(self, zone, path):
-        """Write the zone's 512x512 crop as a binary PPM; return the path."""
-        x0, y0 = ZONES[zone]
+        """Write the zone's 512x512 view as a binary PPM; return the path.
+
+        The frame minus 40 rows top and bottom (1280x640) is squeezed 5:4 to 1024x512 by dropping every
+        fifth column and row. Left half = tray, right half = patient area, so the zones tile the full width.
+        """
         luma = self.luma()
-        gray = b"".join(luma[(y0 + r) * W + x0:(y0 + r) * W + x0 + CROP] for r in range(CROP))
+        sw = W * 4 // 5
+        squeezed = bytearray(sw * H)
+        for k in range(4):
+            squeezed[k::4] = luma[k::5]
+        x0 = ZONES[zone]
+        rows = [r for r in range(40, H - 40) if (r - 40) % 5 != 4]
+        gray = b"".join(squeezed[r * sw + x0:r * sw + x0 + CROP] for r in rows)
         rgb = bytearray(CROP * CROP * 3)
         rgb[0::3] = gray
         rgb[1::3] = gray

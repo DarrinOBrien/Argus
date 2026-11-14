@@ -1,11 +1,9 @@
 {
   "name": "Laparoscopic appendectomy (demo protocol)",
-  "items": ["swab", "scalpel", "forceps", "probe"],
+  "items": ["tissue", "instrument"],
   "item_hints": {
-    "swab": "flat rectangular cloth or paper pad",
-    "scalpel": "knife-shaped tool",
-    "forceps": "fork-shaped tool",
-    "probe": "thin metal rod"
+    "tissue": "flat rectangular paper tissue or cloth pad",
+    "instrument": "hand tool such as a knife, fork, scissors, tweezers or thin metal rod"
   },
   "steps": [
     {"id": "timeout", "name": "Team time-out and count in", "keywords": ["time out", "timeout", "count in"], "max_minutes": 5},
