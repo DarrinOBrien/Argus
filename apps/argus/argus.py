@@ -1,0 +1,493 @@
+#!/usr/bin/env python3
+"""Argus: an always-on eye and ear for the operating room, running entirely on the IQ-9075.
+
+observe (camera zones, microphone) -> model proposes (LFM3-Omni on the Hexagon NPU via ZETIC)
+-> code decides (inventory, protocol, dose and timing rules) -> alert (screen, optional speech) -> JSONL log.
+
+Standard library only. No network calls: local model files, local web page, loopback by default.
+"""
+import argparse
+import array
+import collections
+import datetime
+import difflib
+import json
+import os
+from pathlib import Path
+import queue
+import re
+import resource
+import statistics
+import subprocess
+import threading
+import time
+import wave
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+import camera as cam
+import zetic_run
+
+HERE = Path(__file__).resolve().parent
+NUM_WORDS = {w: i for i, w in enumerate(
+    "zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen "
+    "sixteen seventeen eighteen nineteen twenty".split())}
+NUM_WORDS.update({"thirty": 30, "forty": 40, "fifty": 50, "hundred": 100})
+UNITS = {"milligram": "mg", "milligrams": "mg", "mg": "mg", "microgram": "mcg", "micrograms": "mcg", "mcg": "mcg",
+         "milliliter": "ml", "milliliters": "ml", "ml": "ml", "unit": "units", "units": "units",
+         "gram": "g", "grams": "g", "g": "g"}
+NUM = r"(\d+(?:\.\d+)?|" + "|".join(NUM_WORDS) + r")"
+UNIT = r"(" + "|".join(sorted(UNITS, key=len, reverse=True)) + r")"
+DOSE_THEN_DRUG = re.compile(NUM + r"\s*" + UNIT + r"\b\s+(?:of\s+)?([a-z]{4,})", re.I)
+DRUG_THEN_DOSE = re.compile(r"([a-z]{4,})[\s,]+" + NUM + r"\s*" + UNIT + r"\b", re.I)
+
+
+def now():
+    return datetime.datetime.now().astimezone()
+
+
+def clock(ts=None):
+    return (ts or now()).strftime("%H:%M:%S")
+
+
+class Argus:
+    def __init__(self, args):
+        self.args = args
+        self.protocol = json.loads(Path(args.protocol).read_text())
+        self.items = self.protocol["items"]
+        self.run_dir = Path(args.run_dir)
+        self.run_dir.mkdir(parents=True, exist_ok=True)
+        self.log_path = self.run_dir / "argus-log.jsonl"
+        self.log_file = self.log_path.open("a")
+        self.lock = threading.RLock()
+        self.infer_lock = threading.Lock()
+        self.jobs = queue.Queue()
+        self.busy = None
+        self.events = collections.deque(maxlen=200)
+        self.alerts = []
+        self.metrics = []
+        self.zones = {"tray": None, "patient": None}
+        self.zones_time = None
+        self.baseline = None
+        self.baseline_time = None
+        self.last_seen = {}  # item -> {"zone", "time"} for the last sighting in the patient area
+        self.steps = [dict(s, status="pending", started=None, done=None, overdue=False) for s in self.protocol["steps"]]
+        self.current = -1
+        self.drugs = []
+        self.listening = False
+        self.camera = cam.Camera(args.camera, mock=args.mock)
+        self.log("system", message="Argus started", mock=args.mock, model=str(args.model), protocol=self.protocol["name"])
+        threading.Thread(target=self._worker, daemon=True).start()
+        threading.Thread(target=self._ticker, daemon=True).start()
+        threading.Thread(target=self._ear, daemon=True).start()
+
+    # ---------- log ----------
+    def log(self, kind, **fields):
+        record = {"time": now().isoformat(timespec="seconds"), "kind": kind, **fields}
+        with self.lock:
+            self.events.append(record)
+            self.log_file.write(json.dumps(record) + "\n")
+            self.log_file.flush()
+        return record
+
+    def alert(self, severity, message):
+        record = self.log("alert", severity=severity, message=message)
+        with self.lock:
+            self.alerts.append(record)
+        if self.args.speak:
+            self.jobs.put(("speak", message))
+
+    # ---------- model ----------
+    def infer(self, kind, prompt, image=None, audio=None, max_tokens=96):
+        """One capped, sequential request to the local model. Errors come back as data."""
+        with self.infer_lock:
+            started = time.perf_counter()
+            if self.args.mock:
+                result = self._mock(kind, prompt)
+            else:
+                result = zetic_run.run(self.args.sdk, self.args.model, prompt, image=image, audio=audio,
+                                       max_tokens=max_tokens, timeout=self.args.timeout)
+            wall = time.perf_counter() - started
+        t = result.get("timings", {})
+        metric = {"kind": kind, "ok": result["ok"], "wall_s": round(wall, 3), "load_ms": t.get("model_load_ms"),
+                  "ttft_ms": t.get("runtime_ttft_ms"), "tok_s": t.get("runtime_decode_tok_s"),
+                  "tokens": result.get("completion_tokens"),
+                  "peak_rss_mb": round(resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss / 1024, 1)}
+        with self.lock:
+            self.metrics.append(metric)
+        self.log("model", request=kind, text=result.get("text", "")[:400], errors=result.get("errors", []),
+                 device=result.get("device_evidence"), **{k: v for k, v in metric.items() if k != "kind"})
+        return result
+
+    def _mock(self, kind, prompt):
+        """Laptop-only stand-in so the logic and UI can be exercised without the board."""
+        text = "{}"
+        if kind.startswith("vision"):
+            scene_file = self.run_dir / "mock_scene.json"
+            scene = json.loads(scene_file.read_text()) if scene_file.exists() else {
+                "tray": {"gauze": 3, "scissors": 1, "tweezers": 1, "clamp": 2}, "patient": {}}
+            text = json.dumps(scene.get(kind.split(":")[1], {}))
+        elif kind == "parse":
+            text = '{"type": "note"}'
+        return {"ok": True, "text": text, "errors": [], "completion_tokens": len(text) // 4, "device_evidence": "mock",
+                "timings": {"model_load_ms": 0.0, "runtime_ttft_ms": 1.0, "runtime_decode_tok_s": 0.0}}
+
+    # ---------- eye ----------
+    def _count_zone(self, zone):
+        path = self.camera.zone_ppm(zone, str(self.run_dir / f"zone-{zone}.ppm"))
+        keys = ", ".join(f'"{i}": 0' for i in self.items)
+        hints = self.protocol.get("item_hints", {})
+        prompt = ("Count the objects on the table. "
+                  + "; ".join(f"{i} = {hints.get(i, i)}" for i in self.items)
+                  + f". Reply with only one JSON object of integers, like {{{keys}}}.")
+        result = self.infer(f"vision:{zone}", prompt, image=path, max_tokens=64)
+        match = re.search(r"\{[^{}]*\}", result.get("text", ""))
+        if not result["ok"] or not match:
+            raise ValueError(f"vision request for {zone} was unusable: {result.get('errors')}")
+        raw = json.loads(match.group(0))
+        counts = {}
+        for item in self.items:  # allowlisted keys, bounded integers; anything else is rejected
+            value = raw.get(item, 0)
+            if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 50:
+                raise ValueError(f"vision count for {item} is invalid: {value!r}")
+            counts[item] = value
+        return counts
+
+    def scan(self, reason="scan"):
+        started = time.perf_counter()
+        zones = {zone: self._count_zone(zone) for zone in ("tray", "patient")}
+        stamp = now()
+        with self.lock:
+            self.zones, self.zones_time = zones, clock(stamp)
+            for item, n in zones["patient"].items():
+                if n > 0:
+                    self.last_seen[item] = {"zone": "patient area", "time": clock(stamp)}
+        self.log("observation", reason=reason, zones=zones, loop_s=round(time.perf_counter() - started, 2))
+        return zones
+
+    def count_in(self):
+        zones = self.scan("count_in")
+        baseline = {i: zones["tray"][i] + zones["patient"][i] for i in self.items}
+        with self.lock:
+            self.baseline, self.baseline_time = baseline, clock()
+        self.log("action", action="count_in", baseline=baseline)
+        self._start_step("timeout")
+
+    def closing(self):
+        if self.baseline is None:
+            self.alert("high", "Closing called but no count in was recorded.")
+            return
+        zones = self.scan("count_out")
+        problems = []
+        for item in self.items:
+            expected, on_tray, in_patient = self.baseline[item], zones["tray"][item], zones["patient"][item]
+            if in_patient > 0:
+                problems.append(f"{in_patient} {item} still in the patient area")
+            missing = expected - on_tray - in_patient
+            if missing > 0:
+                seen = self.last_seen.get(item)
+                where = f", last seen in the {seen['zone']} at {seen['time']}" if seen else ", never seen leaving the tray"
+                problems.append(f"{missing} {item} missing{where}")
+            elif missing < 0:
+                problems.append(f"{-missing} more {item} than at count in")
+        self.log("action", action="count_out", baseline=self.baseline, zones=zones, problems=problems)
+        if problems:
+            self.alert("critical", "Count out does not match. " + "; ".join(problems) + ". Do not close.")
+        else:
+            self.log("action", action="count_out_ok", message="Count out matches count in. Safe to close.")
+
+    # ---------- ear ----------
+    def _ear(self):
+        """Record short clips; transcribe only the ones that contain sound."""
+        n = 0
+        while True:
+            if not self.listening or self.args.mock:
+                time.sleep(0.3)
+                continue
+            n = (n + 1) % 8
+            path = self.run_dir / f"clip-{n}.wav"
+            try:
+                subprocess.run(["arecord", "-q", "-D", self.args.mic, "-f", "S16_LE", "-r", "16000", "-c", "1",
+                                "-d", str(self.args.clip_seconds), str(path)], check=True, timeout=self.args.clip_seconds + 10,
+                               capture_output=True)
+                with wave.open(str(path)) as w:
+                    samples = array.array("h", w.readframes(w.getnframes()))
+                peak = max(max(samples, default=0), -min(samples, default=0))
+                if peak >= self.args.mic_threshold:
+                    self.jobs.put(("audio", str(path)))
+            except (OSError, subprocess.SubprocessError, wave.Error, EOFError) as exc:
+                self.log("error", where="microphone", error=str(exc))
+                time.sleep(3)
+
+    def transcribe(self, path):
+        result = self.infer("asr", "Transcribe the audio.", audio=path, max_tokens=96)
+        text = result.get("text", "").strip()
+        if result["ok"] and text:
+            self.handle_utterance(text, "microphone")
+
+    def handle_utterance(self, text, source):
+        self.log("utterance", source=source, text=text)
+        events = self.parse_rules(text)
+        if not events and self.args.parse != "rules":
+            events = self.parse_llm(text)
+        for event in events:
+            self.apply(event, text)
+        if not events:
+            self.log("note", text=text)
+
+    def _drug_name(self, word):
+        match = difflib.get_close_matches(word.lower(), list(self.protocol["drugs"]), n=1, cutoff=0.7)
+        return match[0] if match else None
+
+    def parse_rules(self, text):
+        low, events = text.lower(), []
+        if re.search(r"\bcount(ing)?\s+in\b", low):
+            events.append({"type": "command", "command": "count_in"})
+        if re.search(r"\b(closing|count(ing)?\s+out|closure)\b", low):
+            events.append({"type": "command", "command": "closing"})
+        for pattern, order in ((DOSE_THEN_DRUG, (0, 1, 2)), (DRUG_THEN_DOSE, (1, 2, 0))):
+            for m in pattern.finditer(low):
+                amount, unit, word = (m.group(i + 1) for i in order)
+                name = self._drug_name(word)
+                if name and not any(e.get("drug") == name for e in events):
+                    dose = float(NUM_WORDS[amount]) if amount in NUM_WORDS else float(amount)
+                    events.append({"type": "drug", "drug": name, "dose": dose, "unit": UNITS[unit]})
+        has_drug = any(e["type"] == "drug" for e in events)
+        for step in self.protocol["steps"]:
+            if step["id"] in ("timeout", "closing") or not any(k in low for k in step["keywords"]):
+                continue
+            # A dose given later in the case must not drag the procedure back to induction.
+            if not (step["id"] == "anesthesia" and has_drug and self.current >= 1):
+                events.append({"type": "step", "step_id": step["id"]})
+            break
+        return events
+
+    def parse_llm(self, text):
+        steps = "; ".join(f'{s["id"]} = {s["name"]}' for s in self.protocol["steps"])
+        prompt = ("You keep the log in an operating room. Turn the statement into exactly one JSON object and nothing else. "
+                  'Use {"type":"drug","drug":"name","dose":number,"unit":"mg"} for a medication, '
+                  '{"type":"step","step_id":"id"} when a procedure step starts, or {"type":"note"} otherwise. '
+                  f"Step ids: {steps}. Statement: \"{text}\"")
+        result = self.infer("parse", prompt, max_tokens=64)
+        match = re.search(r"\{[^{}]*\}", result.get("text", ""))
+        if not result["ok"] or not match:
+            return []
+        try:
+            event = json.loads(match.group(0))
+        except ValueError:
+            return []
+        self.log("proposal", source="lfm", event=event)
+        # The model only proposes. Code validates against the protocol before anything is recorded.
+        if event.get("type") == "step" and event.get("step_id") in {s["id"] for s in self.protocol["steps"]}:
+            return [{"type": "step", "step_id": event["step_id"]}]
+        if event.get("type") == "drug" and isinstance(event.get("drug"), str):
+            name, dose = self._drug_name(event["drug"]), event.get("dose")
+            unit = UNITS.get(str(event.get("unit", "")).lower())
+            if name and unit and isinstance(dose, (int, float)) and not isinstance(dose, bool) and 0 < dose < 100000:
+                return [{"type": "drug", "drug": name, "dose": float(dose), "unit": unit}]
+        return []
+
+    def apply(self, event, text):
+        if event["type"] == "command":
+            if event["command"] == "count_in":
+                self.count_in()
+            else:
+                self._start_step("closing")
+                self.closing()
+        elif event["type"] == "step":
+            self._start_step(event["step_id"])
+        elif event["type"] == "drug":
+            spec = self.protocol["drugs"][event["drug"]]
+            record = {"time": clock(), "drug": event["drug"], "dose": event["dose"], "unit": event["unit"]}
+            with self.lock:
+                self.drugs.append(record)
+            self.log("action", action="drug_logged", **record)
+            if event["unit"] != spec["unit"]:
+                self.alert("high", f"{event['drug']} was given in {event['unit']}, protocol expects {spec['unit']}. Please confirm.")
+            elif event["dose"] > spec["max_single_dose"]:
+                self.alert("high", f"{event['dose']:g} {event['unit']} of {event['drug']} is above the protocol limit "
+                                   f"of {spec['max_single_dose']:g} {spec['unit']}. Please confirm.")
+
+    def _start_step(self, step_id):
+        with self.lock:
+            index = next(i for i, s in enumerate(self.steps) if s["id"] == step_id)
+            if index == self.current:
+                return
+            stamp = clock()
+            skipped = [s["name"] for s in self.steps[:index] if s["status"] == "pending"]
+            out_of_order = index < self.current
+            previous = self.steps[self.current]["name"] if self.current >= 0 else None
+            for s in self.steps[:index]:
+                if s["status"] == "active":
+                    s["status"], s["done"] = "done", stamp
+                elif s["status"] == "pending":
+                    s["status"] = "skipped"
+            step = self.steps[index]
+            step.update(status="active", started=stamp, started_at=time.time(), overdue=False)
+            self.current = index
+        self.log("action", action="step_started", step=step_id, name=step["name"])
+        if out_of_order:
+            self.alert("medium", f"Step out of order: '{step['name']}' called after '{previous}'.")
+        if skipped:
+            self.alert("high", "Step skipped: " + ", ".join(skipped) + ".")
+
+    def _ticker(self):
+        while True:
+            time.sleep(5)
+            with self.lock:
+                step = self.steps[self.current] if self.current >= 0 else None
+                late = bool(step and step["status"] == "active" and not step["overdue"]
+                            and time.time() - step["started_at"] > step["max_minutes"] * 60 * self.args.time_scale)
+                if late:
+                    step["overdue"] = True
+            if late:
+                self.alert("medium", f"'{step['name']}' is running longer than the expected {step['max_minutes']} minutes.")
+
+    # ---------- voice ----------
+    def speak(self, message):
+        """Best effort: synthesize with the local model and play on the board speaker."""
+        if self.args.mock:
+            return
+        wav = self.run_dir / "alert.wav"
+        lib = str(Path(self.args.sdk) / "lib")
+        try:
+            with self.infer_lock:
+                started = time.perf_counter()
+                subprocess.run([str(Path(self.args.sdk) / "bin/zetic_lfm3_cli"), "chat", "--model", str(self.args.model),
+                                "--target", "v73", "--lib-dir", lib, "--tts", "--out", str(wav),
+                                "--system", "Perform TTS in American English using a female voice.", message],
+                               env=dict(os.environ, LD_LIBRARY_PATH=lib), cwd=self.args.sdk, check=True,
+                               capture_output=True, timeout=self.args.timeout)
+                wall = time.perf_counter() - started
+            subprocess.run(["aplay", "-q", "-D", self.args.speaker, str(wav)], check=True, capture_output=True, timeout=60)
+            self.log("action", action="spoken", message=message, tts_s=round(wall, 2))
+        except (OSError, subprocess.SubprocessError) as exc:
+            detail = getattr(exc, "stderr", b"") or b""
+            self.log("error", where="speech", error=str(exc)[:200], detail=detail.decode(errors="replace")[-300:])
+
+    # ---------- worker ----------
+    def _worker(self):
+        while True:
+            name, payload = self.jobs.get()
+            self.busy = name
+            try:
+                if name == "count_in":
+                    self.count_in()
+                elif name == "scan":
+                    self.scan()
+                elif name == "closing":
+                    self._start_step("closing")
+                    self.closing()
+                elif name == "say":
+                    self.handle_utterance(payload, "typed")
+                elif name == "audio":
+                    self.transcribe(payload)
+                elif name == "speak":
+                    self.speak(payload)
+            except Exception as exc:  # loop errors are data, not crashes
+                self.log("error", where=name, error=f"{type(exc).__name__}: {exc}")
+            finally:
+                self.busy = None
+
+    def state(self):
+        with self.lock:
+            by_kind = collections.defaultdict(list)
+            for m in self.metrics:
+                if m["ok"]:
+                    by_kind[m["kind"].split(":")[0]].append(m)
+            medians = {}
+            for kind, rows in by_kind.items():
+                medians[kind] = {"n": len(rows)}
+                for key in ("wall_s", "load_ms", "ttft_ms", "tok_s"):
+                    values = [r[key] for r in rows if r[key] is not None]
+                    medians[kind][key] = round(statistics.median(values), 2) if values else None
+            return {"time": clock(), "protocol": self.protocol["name"], "items": self.items, "mock": self.args.mock,
+                    "busy": self.busy, "queued": self.jobs.qsize(), "listening": self.listening,
+                    "camera_error": self.camera.error, "zones": self.zones, "zones_time": self.zones_time,
+                    "baseline": self.baseline, "baseline_time": self.baseline_time, "last_seen": self.last_seen,
+                    "steps": [{k: s[k] for k in ("id", "name", "status", "started", "done", "max_minutes", "overdue")}
+                              for s in self.steps],
+                    "drugs": self.drugs, "alerts": self.alerts[-8:], "events": list(self.events)[-60:],
+                    "last_metric": self.metrics[-1] if self.metrics else None, "medians": medians,
+                    "peak_rss_mb": max((m["peak_rss_mb"] for m in self.metrics), default=None),
+                    "log_path": str(self.log_path)}
+
+
+def make_handler(app):
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def _send(self, code, body, ctype):
+            self.send_response(code)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_GET(self):
+            path = self.path.split("?")[0]
+            try:
+                if path == "/":
+                    self._send(200, (HERE / "static/index.html").read_bytes(), "text/html; charset=utf-8")
+                elif path == "/frame.bmp":
+                    self._send(200, app.camera.preview_bmp(), "image/bmp")
+                elif path == "/api/state":
+                    self._send(200, json.dumps(app.state()).encode(), "application/json")
+                else:
+                    self._send(404, b"not found", "text/plain")
+            except OSError as exc:
+                self._send(503, str(exc).encode(), "text/plain")
+
+        def do_POST(self):
+            length = int(self.headers.get("Content-Length") or 0)
+            try:
+                body = json.loads(self.rfile.read(length) or b"{}") if length <= 4096 else {}
+            except ValueError:
+                body = {}
+            action = self.path.rsplit("/", 1)[-1]
+            if action in ("count_in", "scan", "closing"):
+                app.jobs.put((action, None))
+            elif action == "say" and isinstance(body.get("text"), str) and body["text"].strip():
+                app.jobs.put(("say", body["text"].strip()[:300]))
+            elif action == "listen":
+                app.listening = bool(body.get("on"))
+                app.log("system", message=f"listening {'on' if app.listening else 'off'}")
+            else:
+                return self._send(400, b'{"ok": false}', "application/json")
+            self._send(200, b'{"ok": true}', "application/json")
+    return Handler
+
+
+def main():
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--sdk", default="~/zetic-demo/sdk", help="local Ixian Hexagon SDK directory")
+    p.add_argument("--model", default="~/zetic-demo/models/lfm3-omni-2b", help="local LFM3-Omni package directory")
+    p.add_argument("--protocol", default=str(HERE / "protocols/appendectomy.json"))
+    p.add_argument("--run-dir", default=str(HERE / "run"), help="log, clips and zone snapshots")
+    p.add_argument("--camera", default="/dev/video0")
+    p.add_argument("--mic", default="plughw:CARD=WEBCAM,DEV=0", help="ALSA capture device")
+    p.add_argument("--speaker", default="plughw:CARD=LEMANSEVK,DEV=0", help="ALSA playback device")
+    p.add_argument("--clip-seconds", type=int, default=6)
+    p.add_argument("--mic-threshold", type=int, default=6000, help="peak level (0-32767) that counts as speech")
+    p.add_argument("--parse", choices=("auto", "rules"), default="auto",
+                   help="auto: code rules first, the LFM for statements the rules cannot read")
+    p.add_argument("--speak", action="store_true", help="speak alerts with the model's speech output")
+    p.add_argument("--time-scale", type=float, default=1.0, help="scale step time limits (0.02 for a fast demo)")
+    p.add_argument("--timeout", type=float, default=120, help="seconds per model request, including load")
+    p.add_argument("--host", default="127.0.0.1", help="keep loopback; reach it through SSH port forwarding")
+    p.add_argument("--port", type=int, default=8000)
+    p.add_argument("--mock", action="store_true", help="laptop-only: fake camera and model, to test logic and UI")
+    args = p.parse_args()
+    args.sdk, args.model = os.path.expanduser(args.sdk), os.path.expanduser(args.model)
+    app = Argus(args)
+    server = ThreadingHTTPServer((args.host, args.port), make_handler(app))
+    print(f"Argus on http://{args.host}:{args.port}  log: {app.log_path}", flush=True)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+
+
+if __name__ == "__main__":
+    main()

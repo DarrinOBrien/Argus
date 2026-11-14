@@ -1,6 +1,12 @@
 {
   "name": "Laparoscopic appendectomy (demo protocol)",
-  "items": ["gauze", "scissors", "tweezers", "clamp"],
+  "items": ["swab", "scalpel", "forceps", "probe"],
+  "item_hints": {
+    "swab": "flat rectangular cloth or paper pad",
+    "scalpel": "knife-shaped tool",
+    "forceps": "fork-shaped tool",
+    "probe": "thin metal rod"
+  },
   "steps": [
     {"id": "timeout", "name": "Team time-out and count in", "keywords": ["time out", "timeout", "count in"], "max_minutes": 5},
     {"id": "anesthesia", "name": "Induction of anesthesia", "keywords": ["induction", "anesthesia", "propofol"], "max_minutes": 10},

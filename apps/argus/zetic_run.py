@@ -103,7 +103,8 @@ def run(sdk, model, prompt, *, image=None, audio=None, max_tokens=256, timeout=1
         if not result["text"]:
             result["errors"].append("empty or reasoning-only answer")
         device = next((line for line in stderr.splitlines()
-                       if "hexrt open" in line and "v73" in line and "HEXRT_NSP2=1" in line), None)
+                       if "hexrt open" in line and "v73" in line
+                       and ("HEXRT_NSP2=1" in line or "nsp2=1" in line)), None)  # SDK 0.2.1 logs nsp2=1
         if device is None or f"loaded {name} v73" not in stderr:
             result["errors"].append("missing current-request Hexagon v73/two-NSP evidence")
         result["device_evidence"] = device

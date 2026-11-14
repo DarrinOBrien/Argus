@@ -84,6 +84,7 @@ class Camera:
                 maps.append(mmap.mmap(fd, ln, mmap.MAP_SHARED, mmap.PROT_READ | mmap.PROT_WRITE, offset=off))
                 fcntl.ioctl(fd, _QBUF, qb)
             fcntl.ioctl(fd, _STREAMON, struct.pack("<I", 1))
+            seen = 0
             try:
                 while not self._stop:
                     if not select.select([fd], [], [], 5)[0]:
@@ -93,7 +94,8 @@ class Camera:
                     struct.pack_into("<I", qb, 60, 1)
                     fcntl.ioctl(fd, _DQBUF, qb)
                     k, used = struct.unpack_from("<I", qb, 0)[0], struct.unpack_from("<I", qb, 8)[0]
-                    if used >= W * H * 2:
+                    seen += 1
+                    if used >= W * H * 2 and seen > 10:  # the first frames after stream start are black
                         luma = maps[k][0:W * H * 2:2]  # Y of YUYV
                         with self._lock:
                             self._luma, self._stamp, self.error = luma, time.time(), None
