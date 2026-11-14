@@ -164,7 +164,7 @@ def handler(console):
                 if action != "status":
                     cmd = f"echo {base64.b64encode(console.password.encode()).decode()} | base64 -d | " + cmd
                 return self._send(200, console.run(cmd, 40).encode(), "text/plain; charset=utf-8")
-            if not re.fullmatch(r"/api/(count_in|scan|closing|say|listen|procedure)", self.path):
+            if not re.fullmatch(r"/api/(count_in|scan|closing|say|listen|procedure|reset)", self.path):
                 return self._send(400, b'{"ok": false}', "application/json")
             try:
                 body = json.loads(raw or b"{}")

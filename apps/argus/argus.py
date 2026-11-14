@@ -871,6 +871,11 @@ class Argus:
             try:
                 if name == "count_in":
                     self.count_in()
+                elif name == "reset":
+                    with self.lock:
+                        self.alerts, self.said = [], collections.deque(self.said, maxlen=self.said.maxlen) if hasattr(self.said, "maxlen") else self.said
+                    self.start_procedure(self.args.lock_procedure if self.args.lock_procedure is not None else
+                                         (self.procedure["id"] if self.procedure else 0))
                 elif name == "scan":
                     self.scan()
                 elif name == "closing":
@@ -962,7 +967,7 @@ def make_handler(app):
             except ValueError:
                 body = {}
             action = self.path.rsplit("/", 1)[-1]
-            if action in ("count_in", "scan", "closing"):
+            if action in ("count_in", "scan", "closing", "reset"):
                 app.jobs.put((action, None))
             elif action == "procedure" and str(body.get("query", "")).strip():
                 app.jobs.put(("procedure", str(body["query"]).strip()[:120]))

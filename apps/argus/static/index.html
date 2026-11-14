@@ -317,13 +317,13 @@ footer{margin-top:.5rem;color:var(--faint);font-size:.75rem;overflow-wrap:anywhe
 
 <!-- row 2: charts -->
 <div class="row r2">
-  <section class="card chart">
+  <section hidden class="card chart">
     <h2>Model request time <small>this session, seconds per request</small></h2>
     <div class="legend"><span><i class="ln" style="background:var(--s1)"></i>Vision count</span>
       <span><i class="ln" style="background:var(--s2)"></i>Speech and text</span></div>
     <div id="c-latency"><div class="empty">No request measured yet</div></div>
   </section>
-  <section class="card chart">
+  <section hidden class="card chart">
     <h2>Items seen vs count in <small id="c-items-time"></small></h2>
     <div class="legend"><span><i style="background:var(--tray)"></i>Tray</span>
       <span><i style="background:var(--patient)"></i>Patient area</span>
@@ -349,6 +349,7 @@ footer{margin-top:.5rem;color:var(--faint);font-size:.75rem;overflow-wrap:anywhe
         <button id="b-scan" type="button">Scan</button>
         <button class="warn" id="b-closing" type="button">Closing</button>
         <button id="b-listen" type="button" aria-pressed="false">Listen: off</button>
+        <button class="warn" id="b-reset" type="button">Restart procedure at step 0</button>
       </div>
       <form class="say" id="procform" autocomplete="off">
         <input id="proctext" type="text" list="proclist" placeholder="Procedure: number or name, e.g. 0" aria-label="Procedure">
@@ -383,7 +384,7 @@ footer{margin-top:.5rem;color:var(--faint);font-size:.75rem;overflow-wrap:anywhe
   </div>
 
   <div class="col col3">
-    <section class="card">
+    <section hidden class="card">
       <h2>What Argus saw and did</h2>
       <div id="events"><div class="empty">Waiting for data</div></div>
     </section>
@@ -1135,6 +1136,7 @@ function post(path, body, btn, label, job){
       pollSoon(); return ok;
     });
 }
+$('b-reset').addEventListener('click', function(){ post('/api/reset', undefined, this, 'Restart procedure at step 0'); });
 $('b-countin').addEventListener('click', function(){ post('/api/count_in', undefined, this, 'Count in', 'count_in'); });
 $('b-scan').addEventListener('click', function(){ post('/api/scan', undefined, this, 'Scan', 'scan'); });
 $('b-closing').addEventListener('click', function(){ post('/api/closing', undefined, this, 'Closing', 'closing'); });
