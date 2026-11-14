@@ -431,7 +431,8 @@ def make_handler(app):
                 if path == "/":
                     self._send(200, (HERE / "static/index.html").read_bytes(), "text/html; charset=utf-8")
                 elif path == "/frame.bmp":
-                    self._send(200, app.camera.preview_bmp(), "image/bmp")
+                    step = 8 if "div=8" in self.path else 4 if "div=4" in self.path else 2
+                    self._send(200, app.camera.preview_bmp(step), "image/bmp")
                 elif path == "/api/state":
                     self._send(200, json.dumps(app.state()).encode(), "application/json")
                 else:

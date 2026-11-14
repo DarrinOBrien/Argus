@@ -94,7 +94,7 @@ The model never writes to the inventory, never clears an alert, and never decide
 | `argus.py` | The app: worker queue, inventory, protocol and dose logic, alerts, JSONL log, and the web server |
 | `camera.py` | Standard-library V4L2 capture (no OpenCV, numpy, or PIL). Grabs YUYV 1280x720, keeps the luma plane, and produces the grayscale preview and the 512x512 zone crops |
 | `zetic_run.py` | Wrapper around the vendor CLI `zetic_lfm3_cli`. One capped request per call, local files only, with output and device-evidence guards; errors are returned as data |
-| `protocols/appendectomy.json` | Demo protocol: four item types, six steps with keywords and time limits, and a drug table with units and single-dose maximums |
+| `protocols/appendectomy.json` | Demo protocol: four item types with a shape hint for each, six steps with keywords and time limits, and a drug table with units and single-dose maximums |
 | `static/index.html` | The board-hosted page |
 
 Local endpoints served by `argus.py`: `GET /` (page), `GET /frame.bmp` (camera preview), `GET /api/state` (counts, steps, drugs, alerts, recent log, latency medians), and `POST /api/count_in`, `/api/scan`, `/api/closing`, `/api/say` (typed statement), `/api/listen` (microphone on or off).
@@ -161,7 +161,7 @@ tail -f apps/argus/run/argus-log.jsonl
 | `--run-dir` | `apps/argus/run` | Log, audio clips, and zone crops |
 | `--camera` | `/dev/video0` | V4L2 device |
 | `--mic`, `--speaker` | `plughw:CARD=WEBCAM,DEV=0`, `plughw:CARD=LEMANSEVK,DEV=0` | ALSA capture and playback devices |
-| `--clip-seconds`, `--mic-threshold` | `6`, `2500` | Clip length, and the peak level (0 to 32767) a clip must reach to be transcribed |
+| `--clip-seconds`, `--mic-threshold` | `6`, `6000` | Clip length, and the peak level (0 to 32767) a clip must reach to be transcribed |
 | `--timeout` | `120` | Seconds per model request, including model load |
 
 `python3 apps/argus/argus.py --help` prints the same list.
@@ -174,7 +174,14 @@ python3 apps/argus/argus.py --mock
 # open http://127.0.0.1:8000
 ```
 
-In mock mode the "model" returns the counts in `run/mock_scene.json` (a default tray if the file is absent), so editing that file moves items between zones. Statements are typed into the page instead of spoken.
+In mock mode the "model" returns the counts in `run/mock_scene.json`, so editing that file moves items between zones. Create it with the protocol's item names before pressing Count in, for example:
+
+```bash
+mkdir -p apps/argus/run
+echo '{"tray": {"swab": 3, "scalpel": 1, "forceps": 1, "probe": 1}, "patient": {}}' > apps/argus/run/mock_scene.json
+```
+
+Without that file the built-in mock tray uses item names that are not in the current protocol, so every count reads zero. Statements are typed into the page instead of spoken.
 
 ## Offline status
 
@@ -196,7 +203,7 @@ Checked so far:
   # 0 error(s), 0 warning(s)
   ```
 
-  The page loads no external script, stylesheet, font, or image; it only fetches `/api/state` and `/frame.bmp` from the server that served it. A static audit is a heuristic and is not proof of offline operation. Re-run it if the code changes.
+  The page loads no external script, stylesheet, font, or image; it only talks to the server that served it (`/api/*` and `/frame.bmp`). A static audit is a heuristic and is not proof of offline operation. Re-run it if the code changes.
 
 For the demo, Wi-Fi is turned off from the UART console in front of the judge. The page then has to be reached over a path that does not use Wi-Fi; see [DEMO.md](DEMO.md#before-you-walk-up).
 
@@ -247,7 +254,7 @@ Stated plainly, as of writing:
 - **No measurement has been taken.** The table above is all placeholders.
 - **No network-off rehearsal is recorded.** Argus has not been shown starting cold and running its core workflow with the board's Wi-Fi off.
 - **NPU execution is not recorded for this app.** The wrapper rejects any request that lacks current-request Hexagon v73 / two-NSP evidence and logs the evidence line in each `model` record, but no such record from an Argus run on the board has been saved yet.
-- **Count accuracy is unknown.** How reliably the model counts gauze, scissors, tweezers, and clamps in grayscale 512x512 crops has not been evaluated.
+- **Count accuracy is unknown.** How reliably the model counts swabs, scalpels, forceps, and probes in grayscale 512x512 crops has not been evaluated.
 - **Speech recognition is unverified** for operating-room speech, accents, masks, or background noise. The microphone threshold is a guess until tuned in the room.
 - **Spoken alerts (`--speak`) are unverified** on the board.
 - **The page's reachability after Wi-Fi goes off is unverified.** SSH port forwarding over Wi-Fi ends when Wi-Fi is turned off. An isolated USB-C link, or another path that does not use Wi-Fi, has to be set up and tested before the demo.
@@ -256,7 +263,7 @@ Stated plainly, as of writing:
 
 What has been checked, on a laptop only:
 
-- The demo flow in `--mock` mode through the local API (count in, "10 milligrams propofol", scan, "Closing"): the dose was logged, the protocol advanced, and a critical alert named one missing gauze and where it was last seen. This exercises the code logic with a fake camera and a fake model. It says nothing about the board, the camera, the model, or the NPU.
+- The demo flow in `--mock` mode through the local API (count in, "10 milligrams propofol", scan, "Closing"): the dose was logged, the protocol advanced, and a critical alert named one missing swab and where it was last seen. This exercises the code logic with a fake camera and a fake model. It says nothing about the board, the camera, the model, or the NPU.
 - The static offline audit: 0 errors, 0 warnings. See [Offline status](#offline-status) for its scope.
 
 ## Licences

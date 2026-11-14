@@ -114,10 +114,11 @@ class Camera:
             raise OSError(self.error or "no recent camera frame")
         return luma
 
-    def preview_bmp(self):
+    def preview_bmp(self, step=2):
+        """Grayscale preview, downsampled by `step` (2 -> 640x360; 8 -> 160x90 for the serial bridge)."""
         luma = self.luma()
-        rows = [luma[r * W:(r + 1) * W:2] for r in range(0, H, 2)]
-        return _bmp_gray(b"".join(rows), W // 2, H // 2)
+        rows = [luma[r * W:(r + 1) * W:step] for r in range(0, H, step)]
+        return _bmp_gray(b"".join(rows), W // step, H // step)
 
     def zone_ppm(self, zone, path):
         """Write the zone's 512x512 crop as a binary PPM; return the path."""

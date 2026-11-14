@@ -36,7 +36,7 @@ Do these while Wi-Fi is still on.
 
 - [ ] **Listening on.** Path A: press **Listen** on the page so it reads "on". Path B: use the command in [Path B](#path-b-serial-console-only).
 - [ ] **Camera framed.** Tray in the left zone, patient area in the right zone, both fully inside their squares. Even lighting, no glare.
-- [ ] **Props on the tray:** gauze swabs, scissors, tweezers, clamp. Patient area empty.
+- [ ] **Props on the tray:** the item types in `protocols/appendectomy.json`, currently swabs, a scalpel, forceps, and a probe. Patient area empty.
 - [ ] **One full dry run with a stopwatch**, with these props, Wi-Fi off, including the alarm. Every model request reloads the model, and the flow below makes six vision requests and two speech requests. If the dry run does not fit in two minutes, apply the [cuts](#if-the-dry-run-is-too-long).
 - [ ] **Timer visible** (phone stopwatch on the table).
 - [ ] **Backups on the laptop:** a screen recording of a good run, and a copy of that run's `argus-log.jsonl`.
@@ -50,8 +50,8 @@ Do these while Wi-Fi is still on.
 | 0:20-0:35 | "So let me turn the network off." | **Board, serial console:** type the two commands below. Point at the Wi-Fi row in the output. |
 | 0:35-0:50 | "Count in." | Press **Count in**. Both zones are counted; the Inventory panel shows the baseline and the first protocol step starts. |
 | 0:50-1:05 | "10 milligrams propofol." | Say it toward the camera's microphone and wait: audio is taken in 6-second clips. The Drug log shows propofol, 10 mg, and the step list moves to induction of anesthesia. |
-| 1:05-1:20 | "The model only proposes counts. Code keeps the inventory." | Move one swab and the clamp into the patient area. Press **Scan**; counts change in both zones. Then put the clamp back on the tray and **hide the swab** (palm it, out of both zones). |
-| 1:20-1:40 | "Closing." | Say it clearly. Argus counts out and compares with count in. Two alerts appear: the skipped steps, then the critical one: one gauze missing, last seen in the patient area, do not close. Let it sit for a second. "It also caught that we skipped three steps." |
+| 1:05-1:20 | "The model only proposes counts. Code keeps the inventory." | Move one swab and the forceps into the patient area. Press **Scan**; counts change in both zones. Then put the forceps back on the tray and **hide the swab** (palm it, out of both zones). |
+| 1:20-1:40 | "Closing." | Say it clearly. Argus counts out and compares with count in. Two alerts appear: the skipped steps, then the critical one: one swab missing, last seen in the patient area, do not close. Let it sit for a second. "It also caught that we skipped three steps." |
 | 1:40-1:55 | "Every proposal, decision, and error is in a local log, with timing for each model request." | Tick **show model rows** in the Event log; point at a model row and at the Performance panel. Only quote numbers that are in the README's Measurements table. |
 | 1:55-2:00 | "Next: keep the model loaded between requests, count continuously, add colour, and a clinician-reviewed protocol library. The alarm stays in code." | Stop the timer. |
 
@@ -67,12 +67,12 @@ What the alarm should read (seen in a laptop `--mock` run; not yet seen on the b
 
 ```text
 high      Step skipped: Incision and port placement, Dissect and ligate appendix, Remove appendix.
-critical  Count out does not match. 1 gauze missing, last seen in the patient area at HH:MM:SS. Do not close.
+critical  Count out does not match. 1 swab missing, last seen in the patient area at HH:MM:SS. Do not close.
 ```
 
 Variations you may see, all correct behaviour:
 
-- No **Scan** between count in and closing: the alert says the gauze was "never seen leaving the tray".
+- No **Scan** between count in and closing: the alert says the swab was "never seen leaving the tray".
 - Items still in the patient area at closing: the alert also lists each as "still in the patient area".
 
 Keep these true while speaking:
