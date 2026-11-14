@@ -72,6 +72,10 @@ main{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1.15fr) minmax
 }
 .card h2 small{font-size:14px;font-weight:500;letter-spacing:0;text-transform:none;color:var(--dim)}
 .empty{color:var(--faint);font-size:17px;padding:6px 2px}
+.hrv{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.hrv b{font-size:46px;font-weight:800;line-height:1;color:var(--ok);font-variant-numeric:tabular-nums}
+.hrv.out b{color:var(--crit)}
+.hrv span{font-size:17px;color:var(--dim)}
 
 /* camera */
 #cam{position:relative;width:100%;aspect-ratio:16/9;background:#000;border-radius:6px;overflow:hidden}
@@ -226,6 +230,10 @@ footer{margin-top:10px;color:var(--faint);font-size:13px;overflow-wrap:anywhere}
         <button id="b-say" type="submit">Send</button>
       </form>
       <div id="flash" role="status"></div>
+    </section>
+    <section class="card" id="hrcard" hidden>
+      <h2>Heart rate <small id="hrsrc"></small></h2>
+      <div id="hr"><div class="empty">Waiting for data</div></div>
     </section>
     <section class="card">
       <h2>Drug log</h2>
@@ -471,6 +479,16 @@ function renderDrugs(s){
   setHTML($('drugs'), h + '</tbody></table>');
 }
 
+function renderHR(s){
+  $('hrcard').hidden = !s.polar;
+  if (!s.polar) return;
+  setText($('hrsrc'), 'Polar ' + s.polar);
+  var h = isObj(s.hr) ? s.hr : null;
+  if (!h){ setHTML($('hr'), '<div class="empty">Connecting to strap</div>'); return; }
+  setHTML($('hr'), '<div class="hrv' + (h.out ? ' out' : '') + '"><b>' + esc(h.bpm) + '</b><span>bpm · range ' +
+          esc(h.min) + '-' + esc(h.max) + ' · ' + esc(fmtTime(h.time)) + '</span></div>');
+}
+
 /* ---------- events ---------- */
 var KLABEL = {utterance:'HEARD', action:'ACTION', alert:'ALERT', error:'ERROR', observation:'SEEN',
               proposal:'PROPOSED', note:'NOTE', system:'SYSTEM', model:'MODEL'};
@@ -553,7 +571,7 @@ function renderListen(s){
   setText(b, 'Listen: ' + (listening ? 'on' : 'off'));
 }
 
-var SECTIONS = [renderHeader, renderAlerts, renderInventory, renderSteps, renderDrugs, renderEvents, renderPerf, renderListen];
+var SECTIONS = [renderHeader, renderAlerts, renderInventory, renderSteps, renderHR, renderDrugs, renderEvents, renderPerf, renderListen];
 function render(s){
   if (!isObj(s)) s = {};
   lastState = s;

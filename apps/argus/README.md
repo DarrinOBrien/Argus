@@ -152,6 +152,7 @@ tail -f apps/argus/run/argus-log.jsonl
 | Flag | Default | Purpose |
 |---|---|---|
 | `--mock` | off | Laptop-only: fake camera and fake model, to test the logic and the page. The microphone and speech output are disabled |
+| `--polar ID` | off | Live heart rate from a Polar strap over Bluetooth LE (for example `--polar 1C5EEF3E`). Needs `bleak`; see [Heart rate](#heart-rate-optional) |
 | `--speak` | off | Speak alerts with the model's speech output on the board's speaker |
 | `--parse {auto,rules}` | `auto` | `auto`: code rules first, the model for statements the rules cannot read. `rules`: code rules only, no model parsing |
 | `--time-scale` | `1.0` | Scale step time limits (for example `0.02` so that overdue-step alerts appear in a short demo) |
@@ -165,6 +166,20 @@ tail -f apps/argus/run/argus-log.jsonl
 | `--timeout` | `120` | Seconds per model request, including model load |
 
 `python3 apps/argus/argus.py --help` prints the same list.
+
+### Heart rate (optional)
+
+With `--polar ID`, a background thread finds the strap whose Bluetooth name contains `ID`, subscribes to the standard heart-rate characteristic (no Polar SDK), and shows the live rate on the page. Code raises a `high` alert when the rate leaves the protocol's `vitals` range (`hr_min`, `hr_max`), and when no valid reading arrives for 5 seconds (strap off or out of range). It logs a `vital` record every 30 seconds and on every range change. A lost strap is retried every 3 seconds; errors are logged and the rest of Argus keeps running.
+
+This is the one non-standard-library dependency, and it is only imported with `--polar`. On the **board**, install it once while setup internet is up (needs approval; BlueZ must be running):
+
+```bash
+python3 -m venv --system-site-packages ~/.venvs/argus
+~/.venvs/argus/bin/pip install bleak
+~/.venvs/argus/bin/python apps/argus/argus.py --polar 1C5EEF3E
+```
+
+The strap only advertises while worn with wet electrodes, and a phone or other device holding it can block the connection. Checked so far on a laptop only (macOS, `--mock`): connected to a Polar H10, live rate on the page, out-of-range alert raised once. **Not yet run on the board.**
 
 ### Try it without a board
 
