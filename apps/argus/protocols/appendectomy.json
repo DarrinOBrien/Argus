@@ -1,0 +1,18 @@
+{
+  "name": "Laparoscopic appendectomy (demo protocol)",
+  "items": ["gauze", "scissors", "tweezers", "clamp"],
+  "steps": [
+    {"id": "timeout", "name": "Team time-out and count in", "keywords": ["time out", "timeout", "count in"], "max_minutes": 5},
+    {"id": "anesthesia", "name": "Induction of anesthesia", "keywords": ["induction", "anesthesia", "propofol"], "max_minutes": 10},
+    {"id": "incision", "name": "Incision and port placement", "keywords": ["incision", "port"], "max_minutes": 10},
+    {"id": "dissection", "name": "Dissect and ligate appendix", "keywords": ["dissect", "ligat", "dividing"], "max_minutes": 25},
+    {"id": "removal", "name": "Remove appendix", "keywords": ["removing the appendix", "appendix out", "specimen"], "max_minutes": 10},
+    {"id": "closing", "name": "Count out and closing", "keywords": ["closing", "count out", "closure"], "max_minutes": 15}
+  ],
+  "drugs": {
+    "propofol": {"max_single_dose": 200, "unit": "mg"},
+    "fentanyl": {"max_single_dose": 100, "unit": "mcg"},
+    "cefazolin": {"max_single_dose": 2000, "unit": "mg"},
+    "rocuronium": {"max_single_dose": 100, "unit": "mg"}
+  }
+}
