@@ -56,6 +56,24 @@ def clock(ts=None):
     return (ts or now()).strftime("%H:%M:%S")
 
 
+def load_procedures(path):
+    """Read the procedure library: a '=== #N | Name | Specialty ===' heading, then numbered steps."""
+    procedures = []
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                head = re.match(r"=== #(\d+) \| (.+) \| (.+?) ===\s*$", line)
+                step = re.match(r"\d+\.\s+(.*\S)", line)
+                if head:
+                    procedures.append({"id": int(head.group(1)), "name": head.group(2).strip(),
+                                       "specialty": head.group(3).strip(), "steps": []})
+                elif step and procedures:
+                    procedures[-1]["steps"].append(step.group(1))
+    except OSError:
+        pass
+    return procedures
+
+
 class CliSession:
     """One vendor CLI process in interactive mode: the model stays loaded on the NPU between requests.
 
@@ -179,6 +197,14 @@ class Argus:
         self.steps = [dict(s, status="pending", started=None, done=None, overdue=False) for s in self.protocol["steps"]]
         self.current = -1
         self.drugs = []
+        self.procedures = load_procedures(args.procedures)
+        self.procedure = None  # the procedure the team said they are doing
+        self.proc_log = []     # what has been done since then, one plain sentence per line
+        self.proc_drugs = {}   # drug -> doses planned in the procedure's own steps
+        self.out = {}          # item -> instance numbers currently away from the tray
+        self.stable = None     # tray counts the procedure log currently believes
+        self.pending = {}      # item -> a new tray count seen once, waiting for a second scan
+        self.said = collections.deque(maxlen=4)  # alerts spoken aloud, so the microphone can ignore them
         self.listening = False
         self.hr = None
         self.hr_logged = 0.0
@@ -259,12 +285,92 @@ class Argus:
             self.log_file.flush()
         return record
 
-    def alert(self, severity, message):
+    def alert(self, severity, message, speak=False):
         record = self.log("alert", severity=severity, message=message)
         with self.lock:
             self.alerts.append(record)
-        if self.args.speak:
+        if self.args.speak or speak:
+            self.said.append(message)
             self.jobs.put(("speak", message))
+
+    # ---------- procedure ----------
+    def note(self, text):
+        """One plain sentence in the procedure log, with the time it happened."""
+        self.log("procedure_log", text=text)
+        with self.lock:
+            self.proc_log.append({"time": clock(), "text": text})
+
+    def find_procedure(self, text):
+        """The procedure a statement names: by number ('procedure 0', 'demo zero') or by its title."""
+        low = " ".join(text.lower().split())
+        m = re.search(r"\b(?:procedure|operation|demo)\s+(?:number\s+)?" + NUM + r"\b", low)
+        if m:
+            number = NUM_WORDS[m.group(1)] if m.group(1) in NUM_WORDS else float(m.group(1))
+            return next((p for p in self.procedures if p["id"] == number), None)
+        if not re.search(r"\b(procedure|operation|start|starting|begin|beginning|doing|performing)\b", low):
+            return None
+        named = [p for p in self.procedures if p["name"].lower() in low]
+        return max(named, key=lambda p: len(p["name"]), default=None)
+
+    def choose_procedure(self, query):
+        """From the page: a number, or all or part of a title."""
+        low = query.lower().strip().lstrip("#")
+        if low.isdigit() or low in NUM_WORDS:
+            return self.start_procedure(NUM_WORDS[low] if low in NUM_WORDS else int(low))
+        named = sorted((p for p in self.procedures if low in p["name"].lower()), key=lambda p: len(p["name"]))
+        if not named:
+            close = difflib.get_close_matches(low, [p["name"].lower() for p in self.procedures], n=1, cutoff=0.6)
+            named = [p for p in self.procedures if close and p["name"].lower() == close[0]]
+        if not named:
+            self.log("error", where="procedure", error=f"no procedure matches '{query}'")
+            return
+        self.start_procedure(named[0]["id"])
+
+    def start_procedure(self, number):
+        procedure = next((p for p in self.procedures if p["id"] == number), None)
+        if procedure is None:
+            self.log("error", where="procedure", error=f"no procedure #{number} in {self.args.procedures}")
+            return
+        planned = collections.defaultdict(list)
+        for step in procedure["steps"]:
+            for m in DOSE_THEN_DRUG.finditer(step.lower()):
+                amount = float(NUM_WORDS[m.group(1)]) if m.group(1) in NUM_WORDS else float(m.group(1))
+                planned[m.group(3)].append({"dose": amount, "unit": UNITS[m.group(2)]})
+        with self.lock:
+            self.procedure = dict(procedure, started=clock())
+            self.proc_drugs, self.proc_log, self.drugs = dict(planned), [], []
+        self.log("action", action="procedure_started", procedure=procedure["id"], name=procedure["name"],
+                 specialty=procedure["specialty"], steps=len(procedure["steps"]))
+        self.note(f"Procedure #{procedure['id']} {procedure['name']} started")
+        self.count_in()  # the reference count that 'taken' and 'returned' are measured against
+
+    def track(self, zones, confirmed=False):
+        """Turn tray-count changes into numbered 'taken' and 'returned' lines.
+
+        A change has to be seen in two scans in a row (or in a confirmed scan) before it is written,
+        so one miscount by the model does not become history."""
+        if self.stable is None:
+            return
+        taken, returned = [], []
+        with self.lock:
+            for item in self.items:
+                n = zones["tray"][item]
+                if n == self.stable[item]:
+                    self.pending.pop(item, None)
+                elif not confirmed and self.pending.get(item) != n:
+                    self.pending[item] = n
+                else:
+                    out = self.out.setdefault(item, [])
+                    for _ in range(self.stable[item] - n):  # fewer on the tray: taken, lowest free number
+                        out.append(next(k for k in range(1, 1000) if k not in out))
+                        taken.append(f"{item} {out[-1]}")
+                    for _ in range(n - self.stable[item]):  # more on the tray: returned, oldest first
+                        returned.append(f"{item} {out.pop(0)}" if out else f"an extra {item}")
+                    self.stable[item] = n
+                    self.pending.pop(item, None)
+        for names, verb in ((taken, "taken"), (returned, "returned")):
+            if names:
+                self.note((" and ".join(names) + " " + verb).capitalize())
 
     # ---------- model ----------
     def infer(self, kind, prompt, image=None, audio=None, max_tokens=96):
@@ -322,7 +428,7 @@ class Argus:
         if kind.startswith("vision"):
             scene_file = self.run_dir / "mock_scene.json"
             scene = json.loads(scene_file.read_text()) if scene_file.exists() else {
-                "tray": {"gauze": 3, "scissors": 1, "tweezers": 1, "clamp": 2}, "patient": {}}
+                "tray": {item: 2 for item in self.items}, "patient": {}}
             text = json.dumps(scene.get(kind.split(":")[1], {}))
         elif kind == "parse":
             text = '{"type": "note"}'
@@ -368,6 +474,8 @@ class Argus:
                 if n > 0:
                     self.last_seen[item] = {"zone": "patient area", "time": clock(stamp)}
         self.log("observation", reason=reason, zones=zones, loop_s=round(time.perf_counter() - started, 2))
+        if reason != "count_in":
+            self.track(zones, confirmed=confirm)
         return zones
 
     def count_in(self):
@@ -375,7 +483,9 @@ class Argus:
         baseline = {i: zones["tray"][i] + zones["patient"][i] for i in self.items}
         with self.lock:
             self.baseline, self.baseline_time = baseline, clock()
+            self.stable, self.pending, self.out = dict(zones["tray"]), {}, {}
         self.log("action", action="count_in", baseline=baseline)
+        self.note("Count in: " + ", ".join(f"{n} {item}" for item, n in zones["tray"].items()) + " on the tray")
         self._start_step("timeout")
 
     def closing(self):
@@ -432,6 +542,10 @@ class Argus:
 
     def handle_utterance(self, text, source):
         self.log("utterance", source=source, text=text)
+        if source == "microphone" and any(
+                difflib.SequenceMatcher(None, text.lower(), said.lower()).ratio() > 0.6 for said in self.said):
+            self.log("note", text=text, ignored="this is Argus's own spoken alert")
+            return
         events = self.parse_rules(text)
         if not events and self.args.parse != "rules":
             events = self.parse_llm(text)
@@ -441,10 +555,14 @@ class Argus:
             self.log("note", text=text)
 
     def _drug_name(self, word):
-        match = difflib.get_close_matches(word.lower(), list(self.protocol["drugs"]), n=1, cutoff=0.7)
+        known = list(self.protocol["drugs"]) + list(self.proc_drugs)
+        match = difflib.get_close_matches(word.lower(), known, n=1, cutoff=0.7)
         return match[0] if match else None
 
     def parse_rules(self, text):
+        procedure = self.find_procedure(text)
+        if procedure:
+            return [{"type": "procedure", "id": procedure["id"]}]
         low, events = text.lower(), []
         if re.search(r"\bcount(ing)?\s+in\b", low):
             events.append({"type": "command", "command": "count_in"})
@@ -499,14 +617,29 @@ class Argus:
             else:
                 self._start_step("closing")
                 self.closing()
+        elif event["type"] == "procedure":
+            self.start_procedure(event["id"])
         elif event["type"] == "step":
             self._start_step(event["step_id"])
         elif event["type"] == "drug":
-            spec = self.protocol["drugs"][event["drug"]]
+            name, planned = event["drug"], self.proc_drugs.get(event["drug"], [])
+            with self.lock:
+                given = [d for d in self.drugs if d["drug"] == name]
+            if len(given) >= max(1, len(planned)):
+                # Announced again after it was already given: say so out loud and do not record a second dose.
+                # The spoken sentence carries no dose, so hearing it back cannot be read as another one.
+                self.log("action", action="drug_repeat_blocked", drug=name, dose=event["dose"], unit=event["unit"],
+                         first_given=given[0]["time"])
+                self.note(f"{name.capitalize()} announced again; already added at {given[0]['time']}. "
+                          "Warned, not recorded as given")
+                self.alert("critical", f"Don't do that! Someone already added {name}.", speak=True)
+                return
+            spec = self.protocol["drugs"].get(name) or {"unit": planned[0]["unit"], "max_single_dose": planned[0]["dose"]}
             record = {"time": clock(), "drug": event["drug"], "dose": event["dose"], "unit": event["unit"]}
             with self.lock:
                 self.drugs.append(record)
             self.log("action", action="drug_logged", **record)
+            self.note(f"{event['dose']:g} {event['unit']} of {name} added")
             if event["unit"] != spec["unit"]:
                 self.alert("high", f"{event['drug']} was given in {event['unit']}, protocol expects {spec['unit']}. Please confirm.")
             elif event["dose"] > spec["max_single_dose"]:
@@ -601,6 +734,8 @@ class Argus:
                 elif name == "closing":
                     self._start_step("closing")
                     self.closing()
+                elif name == "procedure":
+                    self.choose_procedure(payload)
                 elif name == "say":
                     self.handle_utterance(payload, "typed")
                 elif name == "audio":
@@ -631,6 +766,12 @@ class Argus:
                     "steps": [{k: s[k] for k in ("id", "name", "status", "started", "done", "max_minutes", "overdue")}
                               for s in self.steps],
                     "drugs": self.drugs, "polar": self.args.polar, "hr": self.hr, "alerts": self.alerts[-8:],
+                    # Kept small: the page may be polling over a slow serial link.
+                    "procedure": self.procedure and {
+                        "id": self.procedure["id"], "name": self.procedure["name"], "started": self.procedure["started"],
+                        "step_count": len(self.procedure["steps"]),
+                        "steps": [s[:90] for s in self.procedure["steps"][:12]]},
+                    "procedure_log": self.proc_log[-14:], "procedures": len(self.procedures), "out": self.out,
                     "events": [{k: v for k, v in e.items() if k != "device"} for e in self.events
                                if e["kind"] not in ("model", "observation")][-30:],
                     "last_metric": self.metrics[-1] if self.metrics else None, "medians": medians,
@@ -677,6 +818,8 @@ def make_handler(app):
             action = self.path.rsplit("/", 1)[-1]
             if action in ("count_in", "scan", "closing"):
                 app.jobs.put((action, None))
+            elif action == "procedure" and str(body.get("query", "")).strip():
+                app.jobs.put(("procedure", str(body["query"]).strip()[:120]))
             elif action == "say" and isinstance(body.get("text"), str) and body["text"].strip():
                 app.jobs.put(("say", body["text"].strip()[:300]))
             elif action == "listen":
@@ -693,6 +836,9 @@ def main():
     p.add_argument("--sdk", default="~/zetic-demo/sdk", help="local Ixian Hexagon SDK directory")
     p.add_argument("--model", default="~/zetic-demo/models/lfm3-omni-2b", help="local LFM3-Omni package directory")
     p.add_argument("--protocol", default=str(HERE / "protocols/appendectomy.json"))
+    library = next((d / "procedures_step_by_step.txt" for d in (HERE, HERE.parent.parent)
+                    if (d / "procedures_step_by_step.txt").exists()), HERE / "procedures_step_by_step.txt")
+    p.add_argument("--procedures", default=str(library), help="step-by-step procedure library (text file)")
     p.add_argument("--run-dir", default=str(HERE / "run"), help="log, clips and zone snapshots")
     p.add_argument("--camera", default="auto", help="V4L2 device, or auto for the first USB camera")
     p.add_argument("--mic", default="plughw:CARD=WEBCAM,DEV=0", help="ALSA capture device")
