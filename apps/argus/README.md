@@ -262,6 +262,16 @@ Notes for whoever fills this in:
 - The time taken by the code rules themselves (inventory, dose, protocol) is not instrumented as its own field.
 - `peak_rss_mb` is the largest child process so far, as reported by the operating system; it is host memory, not NPU or device memory.
 
+### Procedure log
+
+The procedure library is `procedures_step_by_step.txt` at the repository root (or `--procedures`): a `=== #N | Name | Specialty ===` heading, then numbered steps. Choose a procedure in the page's procedure box (number or name), or say or type it ("we are doing demo 0", "starting laparoscopic gastric bypass"). Argus then counts in and keeps a timed, plain-sentence log in the Procedure log card and as `procedure_log` records in the JSONL log:
+
+- **Taken and returned, numbered.** Camera changes to the tray count (seen in two scans in a row) and spoken or typed statements ("one tissue is taken", "taking two knives", "tissue one and tissue two returned") both write lines such as `Tissue 1 and tissue 2 taken`. Words are mapped to items through `item_aliases` in the protocol. A statement within 45 seconds of the same change seen by the camera is not counted twice, and a statement made first moves the count the camera compares against.
+- **Procedure steps.** A statement that matches the next uncalled step of the chosen procedure ("the shirt is lifted") is logged as that step with its time.
+- **Repeat doses.** A drug announced again after the doses the procedure plans (or after one dose, for a drug the procedure does not mention) is not recorded. Argus raises a critical alert and speaks "Don't do that! Someone already added <drug>." The spoken sentence carries no dose, so the microphone hearing it back is not read as another one. This applies to every drug, including the protocol's own.
+
+`GET /api/procedures` lists the library for the page's picker; `POST /api/procedure` with `{"query": "0"}` starts one.
+
 ## What is not verified yet
 
 Stated plainly, as of writing:
@@ -279,6 +289,7 @@ Stated plainly, as of writing:
 What has been checked, on a laptop only:
 
 - The demo flow in `--mock` mode through the local API (count in, "10 milligrams propofol", scan, "Closing"): the dose was logged, the protocol advanced, and a critical alert named one missing swab and where it was last seen. This exercises the code logic with a fake camera and a fake model. It says nothing about the board, the camera, the model, or the NPU.
+- The procedure log in `--mock` mode through the local API, with typed statements for demo 0: numbered taken and returned lines with times, steps 2 to 7 matched, a camera change not counted twice when said afterwards, and the second "adding 5 mL of adrenaline" blocked with the spoken-alert job queued. Speech recognition of these phrases on the board is unverified.
 - The static offline audit: 0 errors, 0 warnings. See [Offline status](#offline-status) for its scope.
 
 ## Licences

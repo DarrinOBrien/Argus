@@ -5,6 +5,10 @@
     "tissue": "flat rectangular paper tissue or cloth pad",
     "instrument": "hand tool such as a knife, fork, scissors, tweezers or thin metal rod"
   },
+  "item_aliases": {
+    "tissue": ["tissue", "swab", "gauze", "pad", "sponge"],
+    "instrument": ["instrument", "knife", "knives", "kinfe", "scalpel", "scissors", "forceps", "tweezers", "tool", "probe", "fork"]
+  },
   "steps": [
     {"id": "timeout", "name": "Team time-out and count in", "keywords": ["time out", "timeout", "count in"], "max_minutes": 5},
     {"id": "anesthesia", "name": "Induction of anesthesia", "keywords": ["induction", "anesthesia", "propofol"], "max_minutes": 10},
@@ -18,6 +22,7 @@
     "propofol": {"max_single_dose": 200, "unit": "mg"},
     "fentanyl": {"max_single_dose": 100, "unit": "mcg"},
     "cefazolin": {"max_single_dose": 2000, "unit": "mg"},
-    "rocuronium": {"max_single_dose": 100, "unit": "mg"}
+    "rocuronium": {"max_single_dose": 100, "unit": "mg"},
+    "adrenaline": {"max_single_dose": 10, "unit": "ml"}
   }
 }

@@ -14,3 +14,6 @@ metrics.json
 
 # Local onboarding/session scratch (not shared guidance)
 .iq9-onboarding/
+
+# Argus working files: run log, audio clips and zone crops (patient data in a real room)
+apps/argus/run/

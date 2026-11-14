@@ -46,6 +46,20 @@ NUM = r"(\d+(?:\.\d+)?|" + "|".join(NUM_WORDS) + r")"
 UNIT = r"(" + "|".join(sorted(UNITS, key=len, reverse=True)) + r")"
 DOSE_THEN_DRUG = re.compile(NUM + r"\s*" + UNIT + r"\b\s+(?:of\s+)?([a-z]{4,})", re.I)
 DRUG_THEN_DOSE = re.compile(r"([a-z]{4,})[\s,]+" + NUM + r"\s*" + UNIT + r"\b", re.I)
+TAKE = re.compile(r"\b(take|takes|taken|taking|took|grab|grabs|grabbed|grabbing|pick(?:s|ed|ing)? up)\b")
+RETURN = re.compile(r"\b(return|returns|returned|returning|put back|putting back|back on the tray)\b")
+STOP = set("the a an is are was were be been of on to in and with into for at by it its this that one".split())
+
+
+def stem(word):
+    for end in ("ing", "ed", "en", "es", "s"):
+        if word.endswith(end) and len(word) - len(end) >= 3:
+            return word[:-len(end)]
+    return word
+
+
+def content_words(text):
+    return {stem(w) for w in re.findall(r"[a-z]+", text.lower()) if w not in STOP}
 
 
 def now():
@@ -204,6 +218,8 @@ class Argus:
         self.out = {}          # item -> instance numbers currently away from the tray
         self.stable = None     # tray counts the procedure log currently believes
         self.pending = {}      # item -> a new tray count seen once, waiting for a second scan
+        self.proc_steps = []   # per step of the chosen procedure: time it was called out, or None
+        self.seen_moves = []   # camera-logged taken/returned, so a spoken one right after is not counted twice
         self.said = collections.deque(maxlen=4)  # alerts spoken aloud, so the microphone can ignore them
         self.listening = False
         self.hr = None
@@ -339,6 +355,7 @@ class Argus:
         with self.lock:
             self.procedure = dict(procedure, started=clock())
             self.proc_drugs, self.proc_log, self.drugs = dict(planned), [], []
+            self.proc_steps = [None] * len(procedure["steps"])
         self.log("action", action="procedure_started", procedure=procedure["id"], name=procedure["name"],
                  specialty=procedure["specialty"], steps=len(procedure["steps"]))
         self.note(f"Procedure #{procedure['id']} {procedure['name']} started")
@@ -366,11 +383,111 @@ class Argus:
                         taken.append(f"{item} {out[-1]}")
                     for _ in range(n - self.stable[item]):  # more on the tray: returned, oldest first
                         returned.append(f"{item} {out.pop(0)}" if out else f"an extra {item}")
+                    verb = "taken" if n < self.stable[item] else "returned"
+                    for _ in range(abs(n - self.stable[item])):
+                        self.seen_moves.append({"item": item, "verb": verb, "at": time.monotonic()})
                     self.stable[item] = n
                     self.pending.pop(item, None)
+            self.seen_moves = [m for m in self.seen_moves if m["at"] > time.monotonic() - 45]
         for names, verb in ((taken, "taken"), (returned, "returned")):
             if names:
-                self.note((" and ".join(names) + " " + verb).capitalize())
+                self.note((" and ".join(names) + " " + verb).capitalize() + " (camera)")
+
+    def _item_name(self, word):
+        """Map a spoken word (knife, swab, kinfe) to a protocol item, or None."""
+        aliases = self.protocol.get("item_aliases", {})
+        word = word.lower()
+        forms = {word, word[:-1] if word.endswith("s") else word, word[:-2] if word.endswith("es") else word}
+        for item in self.items:
+            if forms & set([item] + aliases.get(item, [])):
+                return item
+        return None
+
+    def parse_moves(self, low):
+        """'one tissue taken', 'taking two knives', 'tissue one and tissue two returned' -> move events."""
+        take, back = bool(TAKE.search(low)), bool(RETURN.search(low))
+        if take == back:  # neither, or both in one sentence: too ambiguous to log
+            return []
+        verb, events = ("taken" if take else "returned"), []
+        words = re.findall(r"[a-z]+|\d+", low)
+        i = 0
+        while i < len(words):
+            item = self._item_name(words[i])
+            if item:
+                before = words[i - 1] if i else ""
+                after = words[i + 2] if i + 2 < len(words) and words[i + 1] == "number" else (words[i + 1] if i + 1 < len(words) else "")
+                as_num = lambda w: NUM_WORDS.get(w, int(w) if w.isdigit() else None)
+                count = as_num(before) if before not in ("", "and") else None
+                if before in ("a", "an"):
+                    count = 1
+                ident = as_num(after)
+                events.append({"item": item, "id": ident,
+                               "count": 1 if ident is not None else max(1, min(count or 1, 20))})
+            i += 1
+        return [{"type": "move", "verb": verb, "parts": events}] if events else []
+
+    def apply_move(self, event, source):
+        """A spoken or typed 'taken'/'returned'. It moves the tray count the camera compares against,
+        so the camera seeing the same change afterwards does not log it a second time."""
+        verb, names, deduped = event["verb"], [], []
+        with self.lock:
+            for part in event["parts"]:
+                item = part["item"]
+                out = self.out.setdefault(item, [])
+                for _ in range(part["count"]):
+                    cutoff = time.monotonic() - 45
+                    seen = next((m for m in self.seen_moves
+                                 if m["item"] == item and m["verb"] == verb and m["at"] > cutoff), None)
+                    if seen:  # the camera already logged this one a moment ago
+                        self.seen_moves.remove(seen)
+                        deduped.append(item)
+                        continue
+                    if verb == "taken":
+                        k = part["id"] if part["id"] and part["id"] not in out else next(
+                            k for k in range(1, 1000) if k not in out)
+                        out.append(k)
+                        names.append(f"{item} {k}")
+                        if self.stable is not None:
+                            self.stable[item] = max(0, self.stable[item] - 1)
+                    else:
+                        k = part["id"] if part["id"] in out else (out[0] if out else None)
+                        if k is not None:
+                            out.remove(k)
+                        names.append(f"{item} {k}" if k is not None else f"an extra {item}")
+                        if self.stable is not None:
+                            self.stable[item] += 1
+                    self.pending.pop(item, None)
+        if names:
+            self.log("action", action="item_" + verb, items=names, source=source)
+            self.note((" and ".join(names) + " " + verb).capitalize())
+        if deduped:
+            self.log("note", text=f"{' and '.join(deduped)} {verb} ({source}): already logged from the camera")
+
+    def match_step(self, text):
+        """Index of the chosen procedure's next step that this statement describes, or None."""
+        if not self.procedure:
+            return None
+        said = content_words(text)
+        best, best_score = None, 0.0
+        for i, step in enumerate(self.procedure["steps"]):
+            if self.proc_steps[i] is not None:
+                continue
+            want = content_words(step)
+            if not want:
+                continue
+            hits = sum(1 for w in want if w in said or difflib.get_close_matches(w, said, n=1, cutoff=0.75))
+            score = hits / len(want)
+            if (hits >= 2 or len(want) == 1) and score >= 0.5 and score > best_score:
+                best, best_score = i, score
+        return best
+
+    def mark_step(self, index, quiet=False):
+        with self.lock:
+            self.proc_steps[index] = clock()
+        step = self.procedure["steps"][index]
+        self.log("action", action="procedure_step", step=index + 1, text=step)
+        if not quiet:
+            self.note(f"Step {index + 1}: {step}")
 
     # ---------- model ----------
     def infer(self, kind, prompt, image=None, audio=None, max_tokens=96):
@@ -547,11 +664,15 @@ class Argus:
             self.log("note", text=text, ignored="this is Argus's own spoken alert")
             return
         events = self.parse_rules(text)
-        if not events and self.args.parse != "rules":
+        # A line of the chosen procedure ('the shirt is lifted') is logged as that step, before asking the model.
+        step = self.match_step(text) if not any(e["type"] == "procedure" for e in events) else None
+        if not events and step is None and self.args.parse != "rules":
             events = self.parse_llm(text)
         for event in events:
-            self.apply(event, text)
-        if not events:
+            self.apply(event, text, source)
+        if step is not None:
+            self.mark_step(step, quiet=bool(events))
+        if not events and step is None:
             self.log("note", text=text)
 
     def _drug_name(self, word):
@@ -576,6 +697,8 @@ class Argus:
                     dose = float(NUM_WORDS[amount]) if amount in NUM_WORDS else float(amount)
                     events.append({"type": "drug", "drug": name, "dose": dose, "unit": UNITS[unit]})
         has_drug = any(e["type"] == "drug" for e in events)
+        if not has_drug:
+            events += self.parse_moves(low)
         for step in self.protocol["steps"]:
             if step["id"] in ("timeout", "closing") or not any(k in low for k in step["keywords"]):
                 continue
@@ -610,8 +733,10 @@ class Argus:
                 return [{"type": "drug", "drug": name, "dose": float(dose), "unit": unit}]
         return []
 
-    def apply(self, event, text):
-        if event["type"] == "command":
+    def apply(self, event, text, source="typed"):
+        if event["type"] == "move":
+            self.apply_move(event, source)
+        elif event["type"] == "command":
             if event["command"] == "count_in":
                 self.count_in()
             else:
@@ -770,8 +895,9 @@ class Argus:
                     "procedure": self.procedure and {
                         "id": self.procedure["id"], "name": self.procedure["name"], "started": self.procedure["started"],
                         "step_count": len(self.procedure["steps"]),
-                        "steps": [s[:90] for s in self.procedure["steps"][:12]]},
-                    "procedure_log": self.proc_log[-14:], "procedures": len(self.procedures), "out": self.out,
+                        "steps": [{"text": s[:90], "done": d} for s, d in
+                                  list(zip(self.procedure["steps"], self.proc_steps))[:40]]},
+                    "procedure_log": self.proc_log[-40:], "procedures": len(self.procedures), "out": self.out,
                     "events": [{k: v for k, v in e.items() if k != "device"} for e in self.events
                                if e["kind"] not in ("model", "observation")][-30:],
                     "last_metric": self.metrics[-1] if self.metrics else None, "medians": medians,
@@ -804,6 +930,9 @@ def make_handler(app):
                     self._send(200, app.camera.preview_bmp(step), "image/bmp")
                 elif path == "/api/state":
                     self._send(200, json.dumps(app.state()).encode(), "application/json")
+                elif path == "/api/procedures":
+                    names = [{"id": p["id"], "name": p["name"], "specialty": p["specialty"]} for p in app.procedures]
+                    self._send(200, json.dumps(names).encode(), "application/json")
                 else:
                     self._send(404, b"not found", "text/plain")
             except OSError as exc:
